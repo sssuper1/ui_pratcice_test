@@ -160,11 +160,11 @@ static int sqlite_set_userinfo_callback(void *NotUsed, int argc, char **argv, ch
 			sscanf(argv[1], "%d.%d.%d.%d", &SELFIP_s[0],&SELFIP_s[1],&SELFIP_s[2],&SELFIP_s[3]);
 			memset(cmd,0,sizeof(cmd));
 			sprintf(cmd,
-					"ifconfig br0 %d.%d.%d.%d",
+					"ifconfig eth0 %d.%d.%d.%d",
 					SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);
 			system(cmd);
 				
-			printf("set ------- br0 ip address = %d.%d.%d.%d\n", SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);
+			printf("set ------- eth0 ip address = %d.%d.%d.%d\n", SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);
 			memset(cmd,0,sizeof(cmd));
 			sprintf(cmd,
 					"sed -i \"s/ip_addr .*/ip_addr %s/g\" /mnt/node_xwg",
@@ -440,7 +440,7 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 			meshinfo.rx_channel_mode_isset = 1;
 		}
         /*  meshInfo表中各参数的state值置0  */
-		snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET state = '0' WHERE name = '%s';" \
+		snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET state = '0' WHERE name = '%s' AND state = '0';" \
 					,argv[0]);
         sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL); // 设置忙处理函数，遇忙等待
         Lock(&sqlite3_mutex1,0);
@@ -776,7 +776,7 @@ int sqlite_set_param(void){
 
         }
 
-        sleep(1);
+        sleep(5);
     }
 
     sqlite3_close(g_psqlitedb);
@@ -802,7 +802,11 @@ int sqliteinit(void)
         sqlite3_close(g_psqlitedb);
         return -1;
     }
+	// 1. 开启 WAL 模式（解决并发，抗崩溃）
+	//sqlite3_exec(g_psqlitedb, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
 
+	// 2. 开启同步写入模式（数据直达物理 Flash，不怕断电）
+	//sqlite3_exec(g_psqlitedb, "PRAGMA synchronous=FULL;", NULL, NULL, NULL);
     updateData_init();
     return 0;
 }
@@ -869,7 +873,7 @@ void updateData_meshinfo_qk(const char* name,const int value)
 	//sqlite3 *g_psqlitedb;
     int rc ;
 
-    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '1', lib = '0' WHERE name = '%s';" \
+    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '1', lib = '0' WHERE name = '%s' AND state = '0';" \
     		, value_str,name);
 
     char* errMsg;
@@ -891,7 +895,7 @@ void updateData_meshinfo(stInData data)
 	//sqlite3 *g_psqlitedb;
     int rc ;
 
-    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '%s', lib = '%s' WHERE name = '%s';" \
+    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '%s', lib = '%s' WHERE name = '%s' AND state = '0';" \
     		, data.value, data.state,data.lib,data.name);
 
     char* errMsg;

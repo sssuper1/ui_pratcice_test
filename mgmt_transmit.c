@@ -235,14 +235,14 @@ void mgmt_mysql_init(void){
     char data[10];
     int id;
     int param[9];
-    char version[20];
 
     int i;
     int on = 1;
     int row_cnt;
     char data_hop[100];
     uint8_t cmd[200];
-    char ifname[] = "br0";
+    //char ifname[] = "br0";
+	char ifname[] = "eth0";//ssq
     bzero(param, sizeof(param));
     POWER_LEVEL_INIT = 0;//默认功率等级为0
 	POWER_ATTENUATION_INIT = 0;//默认功率衰减为0
@@ -343,11 +343,11 @@ void mgmt_mysql_init(void){
 				sscanf(nodemessage, "ip_addr %d.%d.%d.%d", &SELFIP_s[0],&SELFIP_s[1],&SELFIP_s[2],&SELFIP_s[3]);
 				memset(cmd,0,sizeof(cmd));
 				sprintf(cmd,
-						"ifconfig br0 %d.%d.%d.%d",
+						"ifconfig eth0 %d.%d.%d.%d",
 						SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);
 				system(cmd);
 				
-				printf("set ------- br0 ip address = %d.%d.%d.%d\n", SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);				
+				printf("set ------- eth0 ip address = %d.%d.%d.%d\n", SELFIP_s[0],SELFIP_s[1],SELFIP_s[2],SELFIP_s[3]);				
 			}
             else if (strcmp(messagename, "slotlen") == 0) {
 				sscanf(nodemessage, "slotlen %d", &g_u8SLOTLEN);
@@ -686,7 +686,7 @@ void mgmt_get_msg(void){
 				//printf("The version of mac-ctrl is inconsistent %s\n",version_compare);
 			}
 
-
+		
 		//更新数据库
 		memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
 		sprintf(stsysteminfodata.name,"%s","ipaddr");
@@ -705,7 +705,7 @@ void mgmt_get_msg(void){
 		sprintf(stsysteminfodata.value,"%s",version);
 		stsysteminfodata.state[0] = '1';
 		updateData_systeminfo(stsysteminfodata);	
-
+		
 		memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
 		sprintf(stsysteminfodata.name,"%s","rf_freq");
 		sprintf(stsysteminfodata.value,"%d",FREQ_INIT);

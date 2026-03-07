@@ -1180,7 +1180,7 @@ int uart_init(void)
 
     while(cnt < MAX_RETRY_COUNT)
     {
-        ui_Fd = open(FD_UI_UART, O_RDWR | O_NOCTTY);
+        ui_Fd = open(FD_UI_UART, O_RDWR);
         if(ui_Fd < 0)
         {
             printf("Failed to open UART %s, retrying... (%d/%d), errno=%d(%s)\n",

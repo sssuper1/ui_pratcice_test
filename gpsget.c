@@ -205,6 +205,7 @@ void getGPS(void)
 		printf("[GPS DEBUG]open gps \r\n");
 		perror("nmeaFd:");
 		sleep(1);
+		return;
 	}
 	gps_getfrom_uart(nmeaFd);//传入串口文件描述符，获取gps信息
 
