@@ -1,7 +1,23 @@
 #ifndef __GPSGET_H
 #define __GPSGET_H
 
-#include "stdint.h"
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<unistd.h>
+#include<termios.h>
+#include<string.h>
+#include<stdint.h>
+
+
+#define MAX_GPS_SIZE 1024
+#define GPS_UART_BAUD    9600
+#define FD_GPS_UART     "/dev/ttymxc1" 
+
+#pragma pack(push, 1)
 
 typedef struct 
 {
@@ -25,5 +41,5 @@ typedef struct
     char altitude_unit;     // 高度单位
 }GPS_INFO;
 
-
+void gps_Thread(void* arg);
 #endif // !__GPSGET_H

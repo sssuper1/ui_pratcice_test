@@ -7,7 +7,7 @@
 #include "mgmt_types.h"
 #define MEM_REQUEST_PORT     7903
 
-#define  FD_UI_UART     "/dev/ttyUL2" 
+#define  FD_UI_UART     "/dev/ttymxc2" 
 #define  MAX_UI_SIZE 1024
 #define  UI_UART_BAUD   115200    
 #define  MAX_RETRY_COUNT  5
@@ -346,6 +346,11 @@ typedef struct
 }MEM_REPLY_FRAME;
 
 #pragma pack(pop) 
+
+uint16_t reply_uart_info(int fd, void* ack_info, uint16_t len);
+uint16_t CRC_Check(uint8_t *CRC_Ptr,uint16_t LEN);
+
+
 
 void get_ui_Thread(void* arg);
 void write_ui_Thread(void* arg);

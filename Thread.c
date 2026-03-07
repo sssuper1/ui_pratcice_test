@@ -2,7 +2,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-pthread_t Creat_Thread(void (pFun)(void *),void *arg){
+pthread_t Create_Thread(void (pFun)(void *),void *arg){
     pthread_t thread_tid =0;
     void *(*pLinuxFun)(void *);
     pLinuxFun = (void *(*)(void *))pFun;

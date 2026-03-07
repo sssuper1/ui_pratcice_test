@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <string.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include "wg_config.h"
 #include "socketUDP.h"
@@ -20,6 +21,44 @@ extern Global_Radio_Param g_radio_param;
 Info_0x06_Statistics stat_info;
 uint8_t SELFID;
 extern GPS_INFO gps_info_uart;
+// ==================== 存根(Stub)测试区 ====================
+
+// 3. 替代底层的 Netlink 获取状态函数 (重点：在这里造假数据)
+void mgmt_netlink_get_info(int type, int cmd, void* arg, char* out_buf) {
+    // printf("[Stub] mgmt_netlink_get_info: 模拟向内核索要状态数据...\n");
+    
+    struct mgmt_send *msg = (struct mgmt_send *)out_buf;
+    memset(msg, 0, sizeof(struct mgmt_send));
+    
+    // 给 0x09 帧（邻居拓扑）伪造几个邻居数据
+    msg->node_id = SELFID;
+    msg->neigh_num = 2;        // 假装我们现在连着 2 个邻居
+    
+    // 伪造邻居 1 的数据
+    msg->msg[0].node_id = 2;   // 邻居ID是2
+    msg->msg[0].rssi = 65;     // 信号强度 -65
+    msg->msg[0].time_jitter = 12; // 延迟 12ms
+    
+    // 伪造邻居 2 的数据
+    msg->msg[1].node_id = 3;   // 邻居ID是3
+    msg->msg[1].rssi = 80;     // 信号强度 -80
+    msg->msg[1].time_jitter = 25; // 延迟 25ms
+
+    // 给 0x07 帧（自检状态）伪造一点功放数据
+    msg->amp_infomation.temperature = 45;       // 温度 45度
+    msg->amp_infomation.battery_level = 88;     // 电量 88%
+    msg->amp_infomation.rf_ch1_rf_power = 200;  // 检波电压
+}
+char mgmt_netlink_set_param(char* buffer, int buflen, const char* header) {
+    printf("[Stub] mgmt_netlink_set_param: 成功拦截向内核下发的参数，测试通过！\n");
+    return 0;
+}
+char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int type)
+{
+    printf("[Stub] mgmt_netlink_set_param_wg: 成功拦截向内核下发的参数，测试通过！\n");
+    return 0;
+}
+// ==========================================================
 
 
 int get_interface_stats(Info_0x06_Statistics* info_stat){
@@ -89,7 +128,7 @@ int8_t Send_0x04(int fd,void* info,int size)
 	memcpy(param_pairs,(Node_Xwg_Pairs*)info,size);
 
     //将04命令需要的参数值构造成一帧
-    frame_send.head = htons(HEAD);
+    frame_send.head = htons(0xD55D);
     frame_send.dirrection = 0X04;
     frame_send.message_type = 0xFF;
     frame_send.current_work_mode = (uint8_t)get_int_value((void*)param_pairs,"macmode");//当前工作模式
@@ -110,10 +149,10 @@ int8_t Send_0x04(int fd,void* info,int size)
 		frame_send.Channel1.hopping_mode = 1;      // 跳频方式 自适应选频
 	}
     frame_send.Channel1.center_freq = (uint32_t)get_int_value((void*)param_pairs,"channel")*1000;
-    frame_send.Channel1.select_freq_1 = (uint32_t)get_int_value((void*)param_pairs,"selectfreq1")*1000;
-    frame_send.Channel1.select_freq_2 = (uint32_t)get_int_value((void*)param_pairs,"selectfreq2")*1000;
-    frame_send.Channel1.select_freq_3 = (uint32_t)get_int_value((void*)param_pairs,"selectfreq3")*1000;
-    frame_send.Channel1.select_freq_4 = (uint32_t)get_int_value((void*)param_pairs,"selectfreq4")*1000;
+    frame_send.Channel1.select_freq_1 = (uint32_t)get_int_value((void*)param_pairs,"select_freq1")*1000;
+    frame_send.Channel1.select_freq_2 = (uint32_t)get_int_value((void*)param_pairs,"select_freq2")*1000;
+    frame_send.Channel1.select_freq_3 = (uint32_t)get_int_value((void*)param_pairs,"select_freq3")*1000;
+    frame_send.Channel1.select_freq_4 = (uint32_t)get_int_value((void*)param_pairs,"select_freq4")*1000;
     frame_send.Channel1.signal_bw = (uint8_t)get_int_value((void*)param_pairs,"bw");
     frame_send.Channel1.mod_wide = (uint8_t)get_int_value((void*)param_pairs,"mcs");
     //frame_send.Channel1.tx_power_spread = (uint8_t)get_int_value((void*)param_pairs,"txpower");
@@ -125,7 +164,7 @@ int8_t Send_0x04(int fd,void* info,int size)
     frame_send.tail = htons(0x5DD5);
     memcpy(send_byte_stream,&frame_send,BYTE04SIZE);
 
-    wrirte(fd,send_byte_stream,BYTE04SIZE);
+    write(fd,send_byte_stream,BYTE04SIZE);
     sleep(1);
     return 0;
 }
@@ -145,7 +184,7 @@ int8_t Send_0x05(int fd,void* info)
 	Global_Radio_Param param;
 	memcpy(&param,(Global_Radio_Param*)info,sizeof(Global_Radio_Param));
 
-    frame_send.head= htons(HEAD);
+    frame_send.head= htons(0xD55D);
     frame_send.dirrection=0x05;
     frame_send.message_type=0xFF;
 
@@ -181,7 +220,7 @@ int8_t Send_0x05(int fd,void* info)
     frame_send.tail = htons(0x5DD5);
     memcpy(send_byte_stream,&frame_send,BYTE05SIZE);
 
-    wrirte(fd,send_byte_stream,BYTE05SIZE);
+    write(fd,send_byte_stream,BYTE05SIZE);
     sleep(1);
 
     return 0;
@@ -232,7 +271,7 @@ int8_t Send_0x06(int fd,void* buf)
     frame_send.tail = htons(0x5DD5);
     memcpy(send_byte_stream,&frame_send,BYTE06SIZE);
 
-    wrirte(fd,send_byte_stream,BYTE06SIZE);
+    write(fd,send_byte_stream,BYTE06SIZE);
     sleep(1);
 
     return 0;
@@ -484,7 +523,80 @@ int8_t Send_0x0A(int fd,void* param,int size)
 	return 0;
 
 }
+static void read_xwg_info(char *info,int size)
+{
+/* temp param */
+	uint8_t  t_workmode=0;
+	uint32_t t_freq;
+	uint8_t  t_bw;
+	uint8_t  t_mcs;
+	uint8_t  t_routing;
+	uint8_t  t_power_level;
+	uint8_t  t_power_atten;
+	uint32_t t_select_freq1,t_select_freq2,t_select_freq3,t_select_freq4;
+	uint8_t  t_kylb;
+	uint8_t  t_sync_mode;
+// read /etc/node_xwg
+	Node_Xwg_Pairs param_pairs[] = {
+        {"channel", 0, 0},{"power", 0, 0},{"bw", 0, 0},{"mcs", 0, 0},
+        {"macmode", 0, 0},{"slotlen", 0, 0},{"router", 0, 0},{"workmode", 0, 0},
+        {"select_freq1", 0, 0},{"select_freq2", 0, 0},{"select_freq3", 0, 0},{"select_freq4", 0, 0},
+		{"sync_mode", 0, 0},{"kylb", 0, 0}
+		// {"longitude ",0,0},{"latitude  ",0,0},{"altitude ",0,0}
+    };
 
+	//sleep(30);
+	read_node_xwg_file("/etc/node_xwg",param_pairs,MAX_XWG_PAIRS);
+
+	NodeBasicInfo node_info;
+	memset(&node_info,0,sizeof(NodeBasicInfo));
+
+	node_info.member_id=SELFID;
+	// sprintf(node_info.ip_address,"192.168.2.%d",SELFID);
+	node_info.ip_address[0]=192;
+	node_info.ip_address[1]=168;
+	node_info.ip_address[2]=2;
+	node_info.ip_address[3]=SELFID;
+
+
+
+	t_workmode=(uint8_t)get_int_value((void*)param_pairs,"workmode");
+
+	t_kylb=(uint8_t )get_int_value((void*)param_pairs,"kylb");
+	t_freq=get_int_value((void*)param_pairs,"channel")*1000;
+	t_select_freq1=get_int_value((void*)param_pairs,"select_freq1");
+	t_select_freq2=get_int_value((void*)param_pairs,"select_freq2");
+	t_select_freq3=get_int_value((void*)param_pairs,"select_freq3");
+	t_select_freq4=get_int_value((void*)param_pairs,"select_freq4");
+	t_sync_mode=(uint8_t)get_int_value((void*)param_pairs,"sync_mode");
+	t_bw=(uint8_t)get_int_value((void*)param_pairs,"bw");
+	t_mcs=(uint8_t)get_int_value((void*)param_pairs,"mcs");
+	t_routing=(uint8_t)get_int_value((void*)param_pairs,"router");
+	// t_power_level
+	// t_power_atten
+
+	node_info.spatial_filter_status=1;  //默认空余滤波关
+	node_info.channel1.ch_frequency_hopping=0; //默认定频
+
+	if(t_kylb==KYLB_MODE_OPEN)
+	{
+		node_info.spatial_filter_status=0;
+	}
+	if(t_workmode==5)
+	{
+		node_info.channel1.ch_frequency_hopping=1;
+	}
+
+
+	node_info.channel1.ch_working_freq=t_freq*1000;
+	node_info.channel1.ch_waveform=t_mcs;
+	node_info.channel1.ch_signal_bandwidth=t_bw;
+	node_info.channel1.ch_routing_protocol=t_routing-1;
+	
+
+	memcpy(info,(void*)&node_info,size);
+    
+}
 void send_member_request(uint8_t id)
 {
     char dest_ip[20];
@@ -985,7 +1097,7 @@ void process_uart_info(int fd,char *info,int len){
 
     cmd_type = uart_buf[2];
 
-    if(cmd_type = 0x0a)
+    if(cmd_type == 0x0a)
     {
         process_cmd_info(PARAM_0A_REQUEST_ADDR,uart_buf[4]);
         return;
@@ -993,7 +1105,7 @@ void process_uart_info(int fd,char *info,int len){
 
     cmd_len = uart_buf[4];
     uint32_t addr = (uart_buf[5]<<24) | (uart_buf[6]<<16) | (uart_buf[7]<<8) | uart_buf[8];
-    addr = htonl(addr);
+    //addr = htonl(addr);  ssq rm 
     param_len = cmd_len -1-4; 
 
     switch(param_len)
@@ -1020,6 +1132,7 @@ void process_uart_info(int fd,char *info,int len){
 
         case 4:
             memcpy(&recv_frame_4,info,len);
+            recv_frame_4.value = ntohl(recv_frame_4.value);//add ssq
             process_cmd_info(addr,recv_frame_4.value);
             //ack
             recv_frame_4.cmd_no = 0x02;
@@ -1062,26 +1175,35 @@ void get_ui_info(int fd)
 
 int uart_init(void)
 {
-    int ui_Fd;
+    int ui_Fd = -1;
     uint8_t cnt =0;
 
     while(cnt < MAX_RETRY_COUNT)
     {
-        ui_Fd = open(FD_UI_UART,O_RDWR);
+        ui_Fd = open(FD_UI_UART, O_RDWR | O_NOCTTY);
         if(ui_Fd < 0)
         {
-            printf("Failed to open UART, retrying... (%d/%d)\n", cnt + 1, MAX_RETRY_COUNT);
+            printf("Failed to open UART %s, retrying... (%d/%d), errno=%d(%s)\n",
+                   FD_UI_UART,
+                   cnt + 1,
+                   MAX_RETRY_COUNT,
+                   errno,
+                   strerror(errno));
             cnt++;
             sleep(1); // 等待一段时间后重试
+        }
+        else
+        {
+            break;
         }
     }
     if(ui_Fd < 0)
     {
-        printf("ERROR:open ui uart fail\r\n");
+        printf("ERROR:open ui uart fail, dev=%s\r\n", FD_UI_UART);
 		return -1;
     }
 
-    printd("[UI DEBUG] uart fd: %d\r\n", ui_Fd);
+    printf("[UI DEBUG] uart fd: %d\r\n", ui_Fd);
 
     set_opt(ui_Fd, UI_UART_BAUD, 8, 'N', 1);
 

@@ -461,3 +461,8 @@ char mgmt_netlink_set_param(char* buffer, int buflen, const char* header)
 	return 0;
 }
 #endif
+
+char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int type)
+{
+	
+}
