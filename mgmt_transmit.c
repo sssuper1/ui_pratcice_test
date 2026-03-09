@@ -10,6 +10,7 @@
 #include "socketUDP.h"
 #include "Lock.h"
 #include "SocketTCP.h"
+#include "mgmt_netlink.h"
 #include <sys/types.h>
 #include <net/if.h>
 #include <sys/socket.h>

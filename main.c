@@ -12,6 +12,7 @@
 #include "mgmt_transmit.h"
 #include "sqlite_unit.h"
 #include "gpsget.h"
+#include "sim_heartbeat.h"
 //#pragma pack(1)
 
 
@@ -33,6 +34,7 @@ void SetupSignal()
 int main() {
     printf("Hello, World!\n");
 
+    sim_init();
     SetupSignal();
     mgmt_mysql_init();
     ui_fd = uart_init();

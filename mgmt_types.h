@@ -49,6 +49,10 @@ typedef unsigned char UINT8;
 #define MSG_TYPE 1
 #define ETH_ADDR_SIZE 6
 
+#define MCS_NUM  8
+#define MAX_QUEUE_NUM 256
+
+#define NO_MCS 0x0f
 
 #define HOP_FREQ_NUM 32
 
@@ -213,6 +217,18 @@ enum{
 
 typedef enum {LinkSt_h1,LinkSt_h2,LinkSt_idle} nbr_link; // 邻居链路状态：h1/h2/空闲
 
+
+struct batadv_jgk_node {
+	__be32   nodeid;   // 节点ID
+	__be32   s_ogm;    // OGM发送计数
+	__be32   r_ogm;    // OGM接收计数
+	__be32   f_ogm;    // OGM转发计数
+	__be32   s_bcast;  // 广播发送计数
+	__be32   r_bcast;  // 广播接收计数
+	__be32   f_bcast;  // 广播转发计数
+	__be32   num;      // 统计计数/保留
+};
+
 struct batadv_jgk_route {
 	uint8_t   route;     // 路由下一跳ID
 	uint8_t   reserved;  // 预留
@@ -231,6 +247,7 @@ struct routetable
 {
 	struct batadv_jgk_route bat_jgk_route[NODE_MAX];
 };
+
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t node_num; // 当前网络节点数量
@@ -461,6 +478,66 @@ typedef struct {
 	uint8_t  reserved;
 }ob_state_part1;
 
+typedef struct {
+	//	uint8_t  packet_class[3]; //0x01_0xaa_0xbb
+	//	uint8_t  node_id;
+	uint16_t time_jitter[NET_SIZE]; // 抖动
+	uint8_t  snr[NET_SIZE];         // 信噪比
+	uint8_t  rssi[NET_SIZE];        // 信号强度
+	uint8_t  mcs[NET_SIZE];         // 调制编码方式
+	short    good[NET_SIZE];        // 好包计数
+	short    bad[NET_SIZE];         // 坏包计数
+	uint8_t  ucds[NET_SIZE];        // UCDS值
+	uint8_t  noise[NET_SIZE];       // 噪声
+}ob_state_part2;
+
+typedef struct {
+	uint16_t tx_in[MAX_QUEUE_NUM];
+	uint16_t tx_qlen[MAX_QUEUE_NUM];
+	uint32_t tx_inall;
+	uint32_t tx_outall;
+	uint32_t tx_in_lose;
+	uint32_t tx_out_lose;
+	uint32_t rx_inall;
+	uint32_t rx_outall;
+	uint32_t rx_in_lose;
+	uint32_t rx_out_lose;
+	uint32_t mac_list_tx_cnt;
+	uint32_t tx_in_cnt;
+	uint32_t phy_tx_done_cnt;
+	uint32_t phy_rx_done_cnt;
+	uint32_t ogm_in;
+	uint32_t ogm_in_len;
+	uint32_t ogm_slot;
+	uint32_t ogm_out_len;
+	uint32_t ping_in;
+	uint32_t ping_in_len;
+	uint32_t ping_slot;
+	uint32_t ping_out_len;
+	uint32_t bcast_in;
+	uint32_t bcast_in_len;
+	uint32_t bcast_slot;
+	uint32_t bcast_out_len;
+	uint32_t ucast_in;
+	uint32_t ucast_in_len;
+	uint32_t ucast_slot;
+	uint32_t ucast_out_len;
+}virt_eth_jgk_info;
+
+typedef struct {
+	uint8_t  veth_version[4];
+	uint8_t  agent_version[4];
+	uint8_t  ctrl_version[4];
+	uint32_t  enqueue_bytes[MCS_NUM]; //每个mcs队列对应的入队列比特数
+	uint32_t  outqueue_bytes[MCS_NUM]; //每个mcs队列对应的处队列比特数
+	ob_state_part1 mac_information_part1; //mac层监管控信息part1
+	ob_state_part2 mac_information_part2; //mac层监管控信息part2
+	virt_eth_jgk_info traffic_queue_information; //业务模块监管控信息
+#ifdef	Radio_SWARM_S2
+	DEVICE_SC_STATUS_REPORT amp_infomation;     //add by sdg 功放数据结构
+#endif
+}jgk_report_infor;
+
 struct mgmt_send {
 	uint8_t node_id;             // 本节点ID
 	uint8_t bw;                  // 带宽
@@ -554,7 +631,26 @@ typedef struct __attribute__((__packed__)) {
 	uint8_t  u8Slotlen;                                // 时隙长度
 	uint8_t resv;                                      // 预留
 }Smgmt_set_param;
-
+typedef struct __attribute__((__packed__)) {
+	uint32_t mgmt_ip;                                // 节点IP
+	uint16_t mgmt_id;                                // 节点ID
+	uint16_t mgmt_route_interval;                    // 路由广播周期
+	uint16_t mgmt_route_ttl;                         // 路由TTL
+	uint16_t mgmt_virt_queue_num;                    // 队列数量
+	uint16_t mgmt_virt_queue_length;                 // 队列深度
+	uint16_t mgmt_virt_qos_stategy;                  // QoS策略
+	uint8_t mgmt_virt_unicast_mcs;                   // 单播MCS
+	uint8_t mgmt_virt_multicast_mcs;                 // 组播MCS
+	uint8_t  mgmt_mac_bw;                            // 带宽
+	uint8_t  reserved;                               // 预留
+	uint32_t mgmt_mac_freq;                          // 频率
+	uint16_t mgmt_mac_txpower;                       // 发射功率
+	uint16_t mgmt_mac_txpower_ch[POWER_CHANNEL_NUM]; // 分通道功率
+	uint8_t  mgmt_rx_channel_mode;                   // 接收通道模式
+	uint16_t mgmt_mac_work_mode;                     // MAC工作模式
+	double   mgmt_longitude;                         // 经度
+	double   mgmt_latitude;                          // 纬度
+}Smgmt_param;
 
 typedef struct ST_NBIFNO{
 	int nbid1;		//邻居ID1

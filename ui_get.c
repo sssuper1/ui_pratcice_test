@@ -12,6 +12,8 @@
 #include "socketUDP.h"
 #include "mgmt_types.h"
 #include "mgmt_transmit.h"
+#include "mgmt_netlink.h"
+#include "sqlite_unit.h"
 #include "gpsget.h"
 
 
@@ -19,46 +21,8 @@ extern int ui_fd;
 
 extern Global_Radio_Param g_radio_param;
 Info_0x06_Statistics stat_info;
-uint8_t SELFID;
+extern uint8_t SELFID;
 extern GPS_INFO gps_info_uart;
-// ==================== 存根(Stub)测试区 ====================
-
-// 3. 替代底层的 Netlink 获取状态函数 (重点：在这里造假数据)
-void mgmt_netlink_get_info(int type, int cmd, void* arg, char* out_buf) {
-    // printf("[Stub] mgmt_netlink_get_info: 模拟向内核索要状态数据...\n");
-    
-    struct mgmt_send *msg = (struct mgmt_send *)out_buf;
-    memset(msg, 0, sizeof(struct mgmt_send));
-    
-    // 给 0x09 帧（邻居拓扑）伪造几个邻居数据
-    msg->node_id = SELFID;
-    msg->neigh_num = 2;        // 假装我们现在连着 2 个邻居
-    
-    // 伪造邻居 1 的数据
-    msg->msg[0].node_id = 2;   // 邻居ID是2
-    msg->msg[0].rssi = 65;     // 信号强度 -65
-    msg->msg[0].time_jitter = 12; // 延迟 12ms
-    
-    // 伪造邻居 2 的数据
-    msg->msg[1].node_id = 3;   // 邻居ID是3
-    msg->msg[1].rssi = 80;     // 信号强度 -80
-    msg->msg[1].time_jitter = 25; // 延迟 25ms
-
-    // 给 0x07 帧（自检状态）伪造一点功放数据
-    msg->amp_infomation.temperature = 45;       // 温度 45度
-    msg->amp_infomation.battery_level = 88;     // 电量 88%
-    msg->amp_infomation.rf_ch1_rf_power = 200;  // 检波电压
-}
-char mgmt_netlink_set_param(char* buffer, int buflen, const char* header) {
-    printf("[Stub] mgmt_netlink_set_param: 成功拦截向内核下发的参数，测试通过！\n");
-    return 0;
-}
-char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int type)
-{
-    printf("[Stub] mgmt_netlink_set_param_wg: 成功拦截向内核下发的参数，测试通过！\n");
-    return 0;
-}
-// ==========================================================
 
 
 int get_interface_stats(Info_0x06_Statistics* info_stat){

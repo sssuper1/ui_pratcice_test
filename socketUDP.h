@@ -19,6 +19,7 @@ int CreateUDPServer(int port);
 int RecvUDPClient(int socket, char *buf, int bufsize, struct sockaddr_in *from,
 		int *from_len);
 int SendUDPClient(int socket, char *msg, int len, struct sockaddr_in * to);
+int SendUDPBrocast(int socket, char* msg, int len, struct sockaddr_in* to);
 int CreateUDPServerToDevice(char* eth, int len, int port);
 void CloseUDPSocket(int workSockfd);
 

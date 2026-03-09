@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include "wg_config.h"
 #include "mgmt_transmit.h"
+#include "mgmt_netlink.h"
 #include "socketUDP.h"
 #include <unistd.h>
 #include "ui_get.h"
@@ -108,9 +109,14 @@ static bool sqlite_db_is_valid(void)
 bool persist_test_db(void)
 {
 	struct stat st;
+	
     //检查文件是否存在且非空
-	if (stat(TEST_DB_SRC, &st) != 0 || st.st_size <= 0) {
+	/*if (stat(TEST_DB_SRC, &st) != 0 || st.st_size <= 0) {
 		printf("[sqlite_unit] skip persist test.db: empty or missing source\n");
+		return false;
+	}*/
+	if (access(TEST_DB_SRC, R_OK) != 0) {
+		printf("[sqlite_unit] skip persist test.db: missing or unreadable source\n");
 		return false;
 	}
     //检查当前 test.db是否损坏
@@ -186,14 +192,16 @@ static int sqlite_set_userinfo_callback(void *NotUsed, int argc, char **argv, ch
 		snprintf(updateSql, sizeof(updateSql), "UPDATE userInfo SET state = '0' WHERE name = '%s';" \
 					,argv[0]);
 		
-		sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+		//sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+		sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
 		Lock(&sqlite3_mutex1,0);
 	    while (SQLITE_OK != sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &zErrMsg)) {
 	        //fprintf(stderr, "callback error1: %s\n", zErrMsg);
 	        counttmp ++;
 	        if(counttmp > 10)
 	        	break;
-	        sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	        //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+			sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
 	    }
 	    Unlock(&sqlite3_mutex1);
 		
@@ -440,9 +448,10 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 			meshinfo.rx_channel_mode_isset = 1;
 		}
         /*  meshInfo表中各参数的state值置0  */
-		snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET state = '0' WHERE name = '%s' AND state = '0';" \
+		snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET state = '0' WHERE name = '%s';" \
 					,argv[0]);
-        sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL); // 设置忙处理函数，遇忙等待
+        //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+		sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
         Lock(&sqlite3_mutex1,0);
 
         while (SQLITE_OK != sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &zErrMsg)) {
@@ -451,7 +460,8 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 			countTmp ++;
 			if(countTmp > 5)
 				break;
-			sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+			//sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+			sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
 		}
 		Unlock(&sqlite3_mutex1);
     }
@@ -506,7 +516,8 @@ int sqlite_set_param(void){
 
     while(1){
 
-        sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+        //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+		sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
 
     	sqlite3_exec(g_psqlitedb,"SELECT * FROM userInfo;",sqlite_set_userinfo_callback, 0, &zErrMsg);
     	sqlite3_exec(g_psqlitedb,"SELECT * FROM meshInfo;",sqlite_set_meshinfo_callback, 0, &zErrMsg);
@@ -803,10 +814,10 @@ int sqliteinit(void)
         return -1;
     }
 	// 1. 开启 WAL 模式（解决并发，抗崩溃）
-	//sqlite3_exec(g_psqlitedb, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+	sqlite3_exec(g_psqlitedb, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
 
 	// 2. 开启同步写入模式（数据直达物理 Flash，不怕断电）
-	//sqlite3_exec(g_psqlitedb, "PRAGMA synchronous=FULL;", NULL, NULL, NULL);
+	sqlite3_exec(g_psqlitedb, "PRAGMA synchronous=FULL;", NULL, NULL, NULL);
     updateData_init();
     return 0;
 }
@@ -822,13 +833,14 @@ void updateData_systeminfo(stInData data)
     		, data.value, data.state,data.lib,data.name);
 
     char* errMsg;
-    sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+    //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
    
 	rc = sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &errMsg);
     if (rc != SQLITE_OK)
     {
-        printf(stderr, "无法更新数据: %s\n", errMsg);
+        fprintf(stderr, "无法更新数据: %s\n", errMsg);
     }
 
     Unlock(&sqlite3_mutex1);
@@ -849,12 +861,13 @@ void updateData_systeminfo_qk(const char* name,const int value)
             "UPDATE systemInfo SET value = '%s', state = '1', lib = '0' WHERE name = '%s';"\
             ,value_str, name);
     // 3. 执行 SQL 语句
-    sqlite3_busy_handler(g_psqlitedb, busyHandle, NULL);
+    //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
 
     rc = sqlite3_exec(g_psqlitedb,updatesql,NULL,0,&errMsg);
     if(rc != SQLITE_OK){
-        printf(stderr,"无法更新数据：%s\r\n",errMsg);
+        fprintf(stderr,"无法更新数据：%s\r\n",errMsg);
     }
 
     Unlock(&sqlite3_mutex1);
@@ -873,17 +886,18 @@ void updateData_meshinfo_qk(const char* name,const int value)
 	//sqlite3 *g_psqlitedb;
     int rc ;
 
-    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '1', lib = '0' WHERE name = '%s' AND state = '0';" \
+    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '1', lib = '0' WHERE name = '%s';" \
     		, value_str,name);
 
     char* errMsg;
-    sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+   //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
    
 	rc = sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &errMsg);
     if (rc != SQLITE_OK)
     {
-        printf(stderr, "无法更新数据: %s\n", errMsg);
+        fprintf(stderr, "无法更新数据: %s\n", errMsg);
     }
 
     Unlock(&sqlite3_mutex1);
@@ -895,17 +909,18 @@ void updateData_meshinfo(stInData data)
 	//sqlite3 *g_psqlitedb;
     int rc ;
 
-    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '%s', lib = '%s' WHERE name = '%s' AND state = '0';" \
+    snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET value = '%s', state = '%s', lib = '%s' WHERE name = '%s';" \
     		, data.value, data.state,data.lib,data.name);
 
     char* errMsg;
-    sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+    //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
    
 	rc = sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &errMsg);
     if (rc != SQLITE_OK)
     {
-        printf(stderr, "无法更新数据: %s\n", errMsg);
+        fprintf(stderr, "无法更新数据: %s\n", errMsg);
     }
 
     Unlock(&sqlite3_mutex1);
@@ -930,13 +945,14 @@ void updateData_linkinfo(stLink *data,int cnt,int selfid)
 	
     char* errMsg;
 
-	sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	//sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
 
     rc = sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &errMsg);
     if (rc != SQLITE_OK)
     {
-        printf(stderr, "无法更新数据: %s\n", errMsg);
+        fprintf(stderr, "无法更新数据: %s\n", errMsg);
     }
 
 	Unlock(&sqlite3_mutex1);
@@ -952,13 +968,14 @@ void updateData_timeslotinfo(unsigned char data, int selfid)
 	
     char* errMsg;
 
-	sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	//sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
+	sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
     Lock(&sqlite3_mutex1,0);
 
     rc = sqlite3_exec(g_psqlitedb, updateSql, NULL, 0, &errMsg);
     if (rc != SQLITE_OK)
     {
-        printf(stderr, "无法更新数据: %s\n", errMsg);
+        fprintf(stderr, "无法更新数据: %s\n", errMsg);
     }
 
 	Unlock(&sqlite3_mutex1);
