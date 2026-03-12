@@ -245,7 +245,7 @@ struct batadv_jgk_route {
 
 struct routetable
 {
-	struct batadv_jgk_route bat_jgk_route[NODE_MAX];
+	struct batadv_jgk_route bat_jgk_route[NODE_MAX]; // 按节点索引保存的路由信息表
 };
 
 
@@ -270,7 +270,7 @@ typedef struct topo_data {
 	uint32_t tx_traffic;	//节点流量发
 	uint32_t rx_traffic;	//节点流量收
 	uint32_t neighbors_num;	//邻居个数
-	struct neighbor_data neighbors_data[];
+	struct neighbor_data neighbors_data[]; // 邻居信息变长数组，长度由 neighbors_num 指定
 }__attribute__((packed)) topo_data;
 
 
@@ -374,8 +374,8 @@ typedef struct {
 typedef struct ST_INDATA{
     char name[20];        // 字段名/键名 (Key)。比如 "ipaddr", "device", "rf_freq", "snr1"
     char value[24];       // 字段值 (Value)。为了通用，所有类型的数据（包括整型、浮点型）在这里都被 sprintf 转成了字符串保存
-    char state[4];        // 状态标志位 (State)。通常填 "1" 或 "0"，用于标记该数据是否刚被更新（脏位），或者是否有效
-    char lib[4];          // 库/来源标志 (Lib)。在特定的数据库操作中，用来标识该数据的来源或者权限类型（比如 '0' 代表内部默认，'1' 代表外部修改等）
+	char state[4];        // 状态标志位 (State)。通常填 "1" 或 "0"："1"=web端修改参数，"0"=未更新/无效
+	char lib[4];          // 库/来源标志 (Lib)。常用 "0" 或 "1"："0"=内部默认，"1"=外部修改
 } stInData;
 
 
@@ -400,18 +400,18 @@ typedef struct BCAST_MESHINFO{
 		
 	// int m_distance;
 	// int m_ssid;
-	uint8_t txpower_isset;            // 功率是否有效
-	uint8_t freq_isset;               // 频率是否有效
-	uint8_t chanbw_isset;             // 带宽是否有效
-	uint8_t rate_isset;               // 速率是否有效
-	uint8_t workmode_isset;           // 工作模式是否有效
-	uint8_t route_isset;              // 路由设置是否有效
-	uint8_t slot_isset;               // 时隙设置是否有效
-	uint8_t trans_mode_isset;	       // 传输模式是否有效
-	uint8_t select_freq_isset;        // 自适应频点是否有效
-	uint8_t power_level_isset;        // 功率等级是否有效
-	uint8_t power_attenuation_isset;  // 功率衰减是否有效
-	uint8_t rx_channel_mode_isset;    // 接收通道模式是否有效
+	uint8_t txpower_isset;            // 功率是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t freq_isset;               // 频率是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t chanbw_isset;             // 带宽是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t rate_isset;               // 速率是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t workmode_isset;           // 工作模式是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t route_isset;              // 路由设置是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t slot_isset;               // 时隙设置是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t trans_mode_isset;	       // 传输模式是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t select_freq_isset;        // 自适应频点是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t power_level_isset;        // 功率等级是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t power_attenuation_isset;  // 功率衰减是否有效（0:无效/不下发，1:有效/下发）
+	uint8_t rx_channel_mode_isset;    // 接收通道模式是否有效（0:无效/不下发，1:有效/下发）
 	//bool bcastmode_isset;
 
 // 用作更新systeminfo库
@@ -429,53 +429,53 @@ typedef struct BCAST_MESHINFO{
 
 typedef struct 
 {
-	uint8_t device_id;
-	uint16_t g_txpower;
-	uint32_t g_rf_freq;
-	uint8_t g_chanbw;
-	uint8_t g_rate;
-	uint8_t g_bcastmode;
-	uint8_t g_workmode;
-	uint8_t g_route;
-	uint8_t g_slot_len;
-	uint16_t g_trans_mode;
-	uint32_t g_select_freq_1;	
-	uint32_t g_select_freq_2;	
-	uint32_t g_select_freq_3;	
-	uint32_t g_select_freq_4;	
+	uint8_t device_id;       // 设备ID
+	uint16_t g_txpower;      // 全局发射功率
+	uint32_t g_rf_freq;      // 全局射频频率
+	uint8_t g_chanbw;        // 全局带宽
+	uint8_t g_rate;          // 全局速率/MCS
+	uint8_t g_bcastmode;     // 全局广播模式（0:组播，1:非组播广播）
+	uint8_t g_workmode;      // 全局工作模式
+	uint8_t g_route;         // 全局路由模式
+	uint8_t g_slot_len;      // 全局时隙长度
+	uint16_t g_trans_mode;   // 全局传输模式
+	uint32_t g_select_freq_1;// 全局自适应频点1
+	uint32_t g_select_freq_2;// 全局自适应频点2
+	uint32_t g_select_freq_3;// 全局自适应频点3
+	uint32_t g_select_freq_4;// 全局自适应频点4
 
 }Global_Radio_Param;
 
 
 struct mgmt_msg {
-	uint32_t  node_id : 8;
-	uint32_t  mcs : 8;
-	uint32_t  ucds : 8;
-	uint32_t  rssi : 8;
-	uint32_t  snr : 8;
-	int  time_jitter : 16;
-	int  good : 16;
-	int  bad : 16;
-	uint32_t  noise : 8;
-	uint32_t  reserved : 8;
+	uint32_t  node_id : 8;      // 邻居节点ID
+	uint32_t  mcs : 8;          // 调制编码方式
+	uint32_t  ucds : 8;         // UCDS链路指标
+	uint32_t  rssi : 8;         // 接收信号强度
+	uint32_t  snr : 8;          // 信噪比
+	int  time_jitter : 16;      // 时延抖动
+	int  good : 16;             // 好包计数
+	int  bad : 16;              // 坏包计数
+	uint32_t  noise : 8;        // 噪声值
+	uint32_t  reserved : 8;     // 预留
 }__attribute__((__packed__));
 
 
 typedef struct {
-	uint8_t  nbr_list[NET_SIZE];
-	uint8_t  slot_list[NET_SIZE * 2];
-	uint8_t  n_used_l0;
-	uint8_t  n_free_hx;
-	uint8_t  n_ol0_hx;
-	uint8_t  n_free_h1;
-	uint8_t  n_ol0_h1;
-	uint8_t  n_free_h2;
-	uint8_t  n_ol0_h2;
-	uint8_t  n_used_l1;
-	uint8_t  ctf_live_num;
-	uint8_t  tsn_avgload_demand;
-	uint8_t  tsn_traffic_demand;
-	uint8_t  reserved;
+	uint8_t  nbr_list[NET_SIZE];      // 邻居节点列表
+	uint8_t  slot_list[NET_SIZE * 2]; // 时隙占用/分配列表
+	uint8_t  n_used_l0;               // L0已使用时隙数
+	uint8_t  n_free_hx;               // HX可用时隙数
+	uint8_t  n_ol0_hx;                // HX与L0重叠时隙数
+	uint8_t  n_free_h1;               // H1可用时隙数
+	uint8_t  n_ol0_h1;                // H1与L0重叠时隙数
+	uint8_t  n_free_h2;               // H2可用时隙数
+	uint8_t  n_ol0_h2;                // H2与L0重叠时隙数
+	uint8_t  n_used_l1;               // L1已使用时隙数
+	uint8_t  ctf_live_num;            // 存活CTF节点数
+	uint8_t  tsn_avgload_demand;      // TSN平均负载需求
+	uint8_t  tsn_traffic_demand;      // TSN流量需求
+	uint8_t  reserved;                // 预留
 }ob_state_part1;
 
 typedef struct {
@@ -492,42 +492,42 @@ typedef struct {
 }ob_state_part2;
 
 typedef struct {
-	uint16_t tx_in[MAX_QUEUE_NUM];
-	uint16_t tx_qlen[MAX_QUEUE_NUM];
-	uint32_t tx_inall;
-	uint32_t tx_outall;
-	uint32_t tx_in_lose;
-	uint32_t tx_out_lose;
-	uint32_t rx_inall;
-	uint32_t rx_outall;
-	uint32_t rx_in_lose;
-	uint32_t rx_out_lose;
-	uint32_t mac_list_tx_cnt;
-	uint32_t tx_in_cnt;
-	uint32_t phy_tx_done_cnt;
-	uint32_t phy_rx_done_cnt;
-	uint32_t ogm_in;
-	uint32_t ogm_in_len;
-	uint32_t ogm_slot;
-	uint32_t ogm_out_len;
-	uint32_t ping_in;
-	uint32_t ping_in_len;
-	uint32_t ping_slot;
-	uint32_t ping_out_len;
-	uint32_t bcast_in;
-	uint32_t bcast_in_len;
-	uint32_t bcast_slot;
-	uint32_t bcast_out_len;
-	uint32_t ucast_in;
-	uint32_t ucast_in_len;
-	uint32_t ucast_slot;
-	uint32_t ucast_out_len;
+	uint16_t tx_in[MAX_QUEUE_NUM]; // 各发送队列累计入队包数
+	uint16_t tx_qlen[MAX_QUEUE_NUM]; // 各发送队列当前队列长度
+	uint32_t tx_inall;            // 发送总入队计数
+	uint32_t tx_outall;           // 发送总出队计数
+	uint32_t tx_in_lose;          // 发送入队丢包计数
+	uint32_t tx_out_lose;         // 发送出队丢包计数
+	uint32_t rx_inall;            // 接收总入队计数
+	uint32_t rx_outall;           // 接收总出队计数
+	uint32_t rx_in_lose;          // 接收入队丢包计数
+	uint32_t rx_out_lose;         // 接收出队丢包计数
+	uint32_t mac_list_tx_cnt;     // MAC列表发送计数
+	uint32_t tx_in_cnt;           // 发送入队次数统计
+	uint32_t phy_tx_done_cnt;     // PHY发送完成计数
+	uint32_t phy_rx_done_cnt;     // PHY接收完成计数
+	uint32_t ogm_in;              // OGM接收包数
+	uint32_t ogm_in_len;          // OGM接收字节数
+	uint32_t ogm_slot;            // OGM占用时隙计数
+	uint32_t ogm_out_len;         // OGM发送字节数
+	uint32_t ping_in;             // Ping接收包数
+	uint32_t ping_in_len;         // Ping接收字节数
+	uint32_t ping_slot;           // Ping占用时隙计数
+	uint32_t ping_out_len;        // Ping发送字节数
+	uint32_t bcast_in;            // 广播接收包数
+	uint32_t bcast_in_len;        // 广播接收字节数
+	uint32_t bcast_slot;          // 广播占用时隙计数
+	uint32_t bcast_out_len;       // 广播发送字节数
+	uint32_t ucast_in;            // 单播接收包数
+	uint32_t ucast_in_len;        // 单播接收字节数
+	uint32_t ucast_slot;          // 单播占用时隙计数
+	uint32_t ucast_out_len;       // 单播发送字节数
 }virt_eth_jgk_info;
 
 typedef struct {
-	uint8_t  veth_version[4];
-	uint8_t  agent_version[4];
-	uint8_t  ctrl_version[4];
+	uint8_t  veth_version[4]; // veth模块版本号
+	uint8_t  agent_version[4]; // agent模块版本号
+	uint8_t  ctrl_version[4]; // ctrl模块版本号
 	uint32_t  enqueue_bytes[MCS_NUM]; //每个mcs队列对应的入队列比特数
 	uint32_t  outqueue_bytes[MCS_NUM]; //每个mcs队列对应的处队列比特数
 	ob_state_part1 mac_information_part1; //mac层监管控信息part1
@@ -557,44 +557,44 @@ struct mgmt_send {
 };
 
 typedef struct __attribute__((__packed__)) {
-	uint16_t mgmt_head;
-	uint16_t mgmt_len;
-	uint16_t mgmt_type;
-	uint16_t mgmt_keep;
-	uint8_t  mgmt_data[];
+	uint16_t mgmt_head; // 管理帧头标识（固定头）
+	uint16_t mgmt_len;  // 管理帧总长度
+	uint16_t mgmt_type; // 管理消息类型
+	uint16_t mgmt_keep; // 保留字段
+	uint8_t  mgmt_data[]; // 变长消息负载
 }Smgmt_header;
 
 typedef struct{
-	uint8_t	 NET_work_mode;
-	uint8_t	 fh_len;
-	uint16_t res;
-	uint32_t hop_freq_tb[HOP_FREQ_NUM];
+	uint8_t	 NET_work_mode; // 网络工作模式：1=定频，2=跳频，3=认知跳频
+	uint8_t	 fh_len;        // 跳频表有效长度（频点个数）
+	uint16_t res;            // 预留
+	uint32_t hop_freq_tb[HOP_FREQ_NUM]; // 跳频频点表
 }Smgmt_net_work_mode;
 
 typedef struct{
-	uint32_t trig_mode;
-	uint32_t catch_addr;
-	uint32_t catch_length;
+	uint32_t trig_mode;   // IQ抓取触发模式（由业务定义，常见为手动/条件触发）
+	uint32_t catch_addr;  // IQ抓取起始地址
+	uint32_t catch_length;// IQ抓取长度
 }Smgmt_IQ_Catch;
 
 #ifdef Radio_SWARM_S2
 typedef struct __attribute__((__packed__)){
-	uint8_t rf_agc_framelock_en; // 帧锁AGC使能
-	uint8_t phy_cfo_bypass_en;   // CFO旁路使能
+	uint8_t rf_agc_framelock_en; // 帧锁AGC使能（0:关闭，1:开启）
+	uint8_t phy_cfo_bypass_en;   // CFO旁路使能（0:关闭，1:开启）
 	uint16_t phy_pre_STS_thresh; // STS阈值
 	uint16_t phy_pre_LTS_thresh; // LTS阈值
 	uint16_t phy_tx_iq0_scale;   // IQ0发射缩放
 	uint16_t phy_tx_iq1_scale;   // IQ1发射缩放
-	uint8_t  phy_msc_length_mode;// MSC长度模式
- 	uint8_t  phy_sfbc_en;        // SFBC使能
+	uint8_t  phy_msc_length_mode;// MSC长度模式（0:标准长度，1:扩展长度）
+	uint8_t  phy_sfbc_en;        // SFBC使能（0:关闭，1:开启）
  	uint8_t  phy_cdd_num;        // CDD数量
  	uint8_t  reserved;           // 预留
 }Smgmt_phy;
 
 #else
 typedef struct __attribute__((__packed__)){
-	uint8_t rf_agc_framelock_en; // 帧锁AGC使能
-	uint8_t phy_cfo_bypass_en;   // CFO旁路使能
+	uint8_t rf_agc_framelock_en; // 帧锁AGC使能（0:关闭，1:开启）
+	uint8_t phy_cfo_bypass_en;   // CFO旁路使能（0:关闭，1:开启）
 	uint16_t phy_pre_STS_thresh; // STS阈值
 	uint16_t phy_pre_LTS_thresh; // LTS阈值
 	uint16_t phy_tx_iq0_scale;   // IQ0发射缩放

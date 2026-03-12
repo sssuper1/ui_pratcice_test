@@ -249,7 +249,7 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
     stInData stsysteminfodata;// 用来暂存从数据库读出的数据，准备下发到内核
 	memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
 
-    if(0 == strcmp(argv[4],"1"))
+    if(0 == strcmp(argv[4],"1"))//处理state=1的记录
     {
         if(0 == strcmp(argv[0],"m_txpower"))
         {
@@ -874,7 +874,7 @@ void updateData_systeminfo_qk(const char* name,const int value)
 }
 
 
-
+//专门用于被wdb端/工控屏端修改的参数，来更新到数据库中，state值直接置1，lib值直接置0，参数值传入函数就行了
 void updateData_meshinfo_qk(const char* name,const int value)
 {
 

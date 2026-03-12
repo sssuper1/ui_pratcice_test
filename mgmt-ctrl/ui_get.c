@@ -692,6 +692,8 @@ void set_opt(int fd,int bspeed,int dbits,int parity,int stopbit)
     bzero(&newtio,sizeof(newtio));
     newtio.c_cflag |= CLOCAL | CREAD; //本地连接，接收使能
     newtio.c_cflag &= ~CSIZE; //屏蔽数据位
+    newtio.c_lflag = 0;
+    newtio.c_oflag = 0;
 
     //设置波特率
     switch(bspeed)
@@ -758,7 +760,7 @@ void set_opt(int fd,int bspeed,int dbits,int parity,int stopbit)
 
 
     newtio.c_cc[VTIME] = 1; //设置等待时间
-    newtio.c_cc[VMIN] = 200; //设置最小接收字符数
+    newtio.c_cc[VMIN] = 0; //允许短帧返回，避免阻塞等待200字节
     //设置新属性，旧属性不再使用
     tcflush(fd,TCIFLUSH); //清空输入缓冲区
     if((tcsetattr(fd,TCSANOW,&newtio)) != 0)
@@ -844,7 +846,7 @@ void process_cmd_info(uint32_t cmd_addr,uint32_t cmd_value)
                     cmd_value);
             system(cmd);
             break;
-        case PARAM_CH1_FREQ_HOPPING_MODE:// 跳频方式
+        case PARAM_CH1_FREQ_HOPPING_MODE:// 跳频方式/工作模式
             printf("[UI DEBUG] work mode: %d \r\n",cmd_value);
             if(cmd_value == 0)
             {
@@ -905,16 +907,16 @@ void process_cmd_info(uint32_t cmd_addr,uint32_t cmd_value)
 					"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
                     KD_ROUTING_OLSR);		
                     system(cmd);
+                    break;
                 case 1:  //aodv
-				printf("[UI DEBUG] set route aodv \r\n");
-				ret = system("/home/root/cs_aodv.sh");
-				if(ret == -1) printf("change batman failed\r\n");
-
-				sprintf(cmd,
-					"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
-				KD_ROUTING_AODV);		
-				system(cmd);
-                break;
+                    printf("[UI DEBUG] set route aodv \r\n");
+                    ret = system("/home/root/cs_aodv.sh");
+                    if(ret == -1) printf("change aodv failed\r\n");
+                    sprintf(cmd,
+                        "sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
+                    KD_ROUTING_AODV);		
+                    system(cmd);
+                    break;
                 case 2:  //batman 
                     printf("[UI DEBUG] set route batman \r\n");
                     ret = system("/home/root/cs_batman.sh");
@@ -923,9 +925,9 @@ void process_cmd_info(uint32_t cmd_addr,uint32_t cmd_value)
                         "sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
                     KD_ROUTING_CROSS_LAYER);		
                     system(cmd);
-                break;
+                    break;
                 default:
-                break;
+                    break;
             }
             break;
         case PARAM_CH1_FIXED_FREQ_CENTER:// 点频-中心频率
@@ -1038,36 +1040,58 @@ void process_uart_info(int fd,char *info,int len){
     memset(uart_buf,0,MAX_UI_SIZE);
     memcpy(uart_buf,info,len);
     
-    //解析uart_buf,解析帧格式
-    //检验帧头,帧尾
     if(uart_buf[0] != 0xd5 || uart_buf[1] != 0x5d)
     {
-        printf("ERROR:uart head error\r\n");
+        printf("ERROR:uart head error, got: %02X %02X\r\n", uart_buf[0], uart_buf[1]);
         return;
     }
-    if(uart_buf[len-2] != 0x5d || uart_buf[len-1] != 0xd5)
-    {
-        printf("ERROR:uart tail error\r\n");
-        return;
-    }
-    //加上crc校验
-    uint16_t recv_crc = (uart_buf[len-4]<<8) | uart_buf[len-3];
-    uint16_t calc_crc = CRC_Check(&uart_buf[2],len-6);
-    if(recv_crc != calc_crc)
-    {
-        printf("ERROR:uart crc error\r\n");
-        return;
-    }
-
     cmd_type = uart_buf[2];
 
     if(cmd_type == 0x0a)
     {
+        if (len < 9) {
+            printf("ERROR: uart 0x0A len not enough. got %d\n", len);
+            return;
+        }
+        if(uart_buf[len-2] != 0x5d || uart_buf[len-1] != 0xd5)
+        {
+            printf("ERROR:uart 0x0A tail error\r\n");
+            return;
+        }
+        uint16_t recv_crc = (uart_buf[len-4]<<8) | uart_buf[len-3];
+        uint16_t calc_crc = CRC_Check(&uart_buf[2],len-6);
+        if(recv_crc != calc_crc)
+        {
+            printf("ERROR:uart 0x0A crc error. Recv:0x%04X Calc:0x%04X\r\n", recv_crc, calc_crc);
+            return;
+        }
         process_cmd_info(PARAM_0A_REQUEST_ADDR,uart_buf[4]);
         return;
     }
 
+    if (cmd_type != 0x01) {
+        return;
+    }
+
     cmd_len = uart_buf[4];
+    uint16_t expected_total_len = 8 + cmd_len;
+    if (len < expected_total_len) {
+        printf("ERROR: uart 0x01 len not enough. expected %d, got %d\n", expected_total_len, len);
+        return;
+    }
+    if(uart_buf[expected_total_len-2] != 0x5d || uart_buf[expected_total_len-1] != 0xd5)
+    {
+        printf("ERROR:uart 0x01 tail error. got: %02X %02X\r\n", uart_buf[expected_total_len-2], uart_buf[expected_total_len-1]);
+        return;
+    }
+    uint16_t recv_crc = (uart_buf[expected_total_len-4]<<8) | uart_buf[expected_total_len-3];
+    uint16_t calc_crc = CRC_Check(&uart_buf[2],expected_total_len-6);
+    if(recv_crc != calc_crc)
+    {
+        printf("ERROR:uart 0x01 crc error. Recv:0x%04X Calc:0x%04X\r\n", recv_crc, calc_crc);
+        return;
+    }
+
     uint32_t addr = (uart_buf[5]<<24) | (uart_buf[6]<<16) | (uart_buf[7]<<8) | uart_buf[8];
     //addr = htonl(addr);  ssq rm 
     param_len = cmd_len -1-4; 
@@ -1076,6 +1100,7 @@ void process_uart_info(int fd,char *info,int len){
     {
         case 1:
             memcpy(&recv_frame_1,info,len);
+            printf("[UART DEBUG] Recv 1-byte CMD. Addr=0x%08X Val=0x%02X\n", addr, recv_frame_1.value);
             process_cmd_info(addr,recv_frame_1.value);
             //ack
             recv_frame_1.cmd_no = 0x02;
@@ -1086,7 +1111,11 @@ void process_uart_info(int fd,char *info,int len){
 
         case 2:
             memcpy(&recv_frame_2,info,len);
-            process_cmd_info(addr,recv_frame_2.value);
+            {
+                uint16_t val_host = ntohs(recv_frame_2.value);
+                printf("[UART DEBUG] Recv 2-byte CMD. Addr=0x%08X Val=0x%04X\n", addr, val_host);
+                process_cmd_info(addr, val_host);
+            }
             //ack
             recv_frame_2.cmd_no = 0x02;
             recv_frame_2.ack_flag = MESSAGE_TYPE_REPLY;
@@ -1096,8 +1125,11 @@ void process_uart_info(int fd,char *info,int len){
 
         case 4:
             memcpy(&recv_frame_4,info,len);
-            recv_frame_4.value = ntohl(recv_frame_4.value);//add ssq
-            process_cmd_info(addr,recv_frame_4.value);
+            {
+                uint32_t val_host = ntohl(recv_frame_4.value);
+                printf("[UART DEBUG] Recv 4-byte CMD. Addr=0x%08X Val=0x%08X\n", addr, val_host);
+                process_cmd_info(addr, val_host);
+            }
             //ack
             recv_frame_4.cmd_no = 0x02;
             recv_frame_4.ack_flag = MESSAGE_TYPE_REPLY;
@@ -1128,8 +1160,9 @@ void get_ui_info(int fd)
         len = read(ui_Fd,ui_info,sizeof(ui_info));
         if(len > 0)
         {
-            ui_info[len] = '\0';
-            printf("Received from UART: %s\n", ui_info);
+            printf("[UART DEBUG] Read %d bytes from UART\n", len);
+            for(int i=0; i<len; i++) printf("%02X ", (unsigned char)ui_info[i]);
+            printf("\n");
             process_uart_info(ui_Fd,ui_info,len);
         }
     }
@@ -1222,11 +1255,11 @@ void write_ui_Thread(void *arg)
 		Send_0x05(ui_Fd,&g_radio_param);// 发送 0x05 设备基础信息(IP/GPS等)
 		//sleep(1);
 
-		  Send_0x06(ui_Fd,(void*)&stat_info);// 发送 0x06 流量统计信息
-		  Send_0x07(ui_Fd,&self_msg.amp_infomation);    //0x07 自检
+		 Send_0x06(ui_Fd,(void*)&stat_info);// 发送 0x06 流量统计信息
+		Send_0x07(ui_Fd,&self_msg.amp_infomation);    //0x07 自检
 		//sleep(1);
 
-		 Send_0x09(ui_Fd,&self_msg);// 发送 0x09 邻居拓扑信息
+		Send_0x09(ui_Fd,&self_msg);// 发送 0x09 邻居拓扑信息
 		// //sleep(1);
 
 		sleep(1);

@@ -34,8 +34,8 @@ void SetupSignal()
 int main() {
     printf("Hello, World!\n");
 
-    sim_init();
-    SetupSignal();
+    sim_init();//初始化测试数据
+    SetupSignal();//忽略SIGPIPE信号，防止写socket时对方关闭导致程序崩溃
     mgmt_mysql_init();
     ui_fd = uart_init();
     if(ui_fd == -1){
@@ -44,7 +44,7 @@ int main() {
     }
     sqliteinit();
     Create_Thread(mgmt_get_msg,NULL);//状态上报
-	Create_Thread(mgmt_recv_web,NULL);
+	Create_Thread(mgmt_recv_web,NULL);//将网页配置的参数通过netlink传递给mgmt模块
 	Create_Thread(mgmt_recv_msg,NULL);
 	Create_Thread(sqlite_set_param,NULL);//参数设置
 	Create_Thread(gps_Thread,NULL);//gps数据获取

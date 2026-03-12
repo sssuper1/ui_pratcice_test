@@ -449,8 +449,8 @@ void mgmt_mysql_init(void){
 		TCPCLIENT_WG[i].time.tv_sec = 0;
 		TCPCLIENT_WG[i].time.tv_usec = 0;
 	}
-	TCPCLIENTCOND_WG = CreateEvent();
-	TCPCLIENTMUTEX_WG = CreateLock();
+	TCPCLIENTCOND_WG = CreateEvent();//创建条件变量
+	TCPCLIENTMUTEX_WG = CreateLock();//创建互斥锁
 
 
 	S_GROUND_PC.sin_family = AF_INET;
@@ -558,7 +558,7 @@ void mgmt_get_msg(void){
     // ===== 构造以太网帧头 =====
 	memcpy(ehdr->dest_mac_addr, dstmac, ETH_ADDR_SIZE);  // 设置目的MAC地址（广播）
 	memcpy(ehdr->src_mac_addr, srcmac, ETH_ADDR_SIZE);   // 设置源MAC地址
-	ehdr->ethertype = 0x0008;                            // 设置以太网类型（IP协议）
+	ehdr->ethertype = htons(0x0800);                          // 设置以太网类型（IPv4协议）
 
     // ===== 构造IP头 =====
 	iphdr = (ip_header*)((void*)ehdr + ETH_HLEN);
@@ -903,6 +903,7 @@ void mgmt_get_msg(void){
 					sprintf(stsysteminfodata.name,"%s","m_rate");
 					sprintf(stsysteminfodata.value,"%d",mparam->mgmt_virt_unicast_mcs);
 					stsysteminfodata.state[0] = '1';
+					
 					updateData_systeminfo(stsysteminfodata);
 				}
 			}
@@ -1810,7 +1811,7 @@ void mgmt_recv_msg(void){
             else{
                 if (FD_ISSET(TCPCLIENT_WG[i].sockfd, &fds)) {
                     ret = RecvTCPServer(TCPCLIENT_WG[i].sockfd,
-						(INT8*)&tcpmsg, sizeof(tcpmsg));
+						(INT8*)&tcpmsg, sizeof(tcpmsg));//读取包头，获得长度
 					if (ret != RETURN_OK) {
 						Lock(&TCPCLIENTMUTEX_WG, 0);
 						CloseTCPSocket(TCPCLIENT_WG[i].sockfd);
@@ -1828,7 +1829,7 @@ void mgmt_recv_msg(void){
 					}
                     bzero(buffer, sizeof(buffer));
 					ret = RecvTCPServer(TCPCLIENT_WG[i].sockfd, buffer,
-						ntohs(tcpmsg.mgmt_len));
+						ntohs(tcpmsg.mgmt_len));//读取载荷长度
 					switch (ntohs(tcpmsg.mgmt_type)){
                     case MGMT_FIRMWARE_UPDATE: {
                             switch (ntohs(tcpmsg.mgmt_keep)) {
@@ -2261,7 +2262,7 @@ void read_node_xwg_file(const char * filename,Node_Xwg_Pairs* xwg_info,int num_p
             }
         }
     }
-    
+	fclose(file);
 }
 
 const char *get_value(Node_Xwg_Pairs* pairs,const char *key) {
