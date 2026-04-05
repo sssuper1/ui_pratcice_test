@@ -10,6 +10,12 @@
 static SimConfig g_sim_config = {1, 1000}; // Default enabled
 static struct mgmt_send g_sim_status;
 static struct routetable g_sim_route;
+static int g_sim_initialized = 0;
+static time_t g_sim_start_ts = 0;
+static int g_last_neigh_num = -1;
+
+#define SIM_DYNAMIC_NEIGH_MAX 3
+#define SIM_NEIGHBOR_STEP_SEC 10
 
 // Helper to generate random float
 float get_random_float(float min, float max) {
@@ -19,6 +25,21 @@ float get_random_float(float min, float max) {
 // Helper to generate random int
 int get_random_int(int min, int max) {
     return min + rand() % (max - min + 1);
+}
+
+static int sim_get_target_neigh_num(void) {
+    time_t now = time(NULL);
+    int phase;
+
+    if (g_sim_start_ts == 0) {
+        g_sim_start_ts = now;
+    }
+
+    phase = (int)((now - g_sim_start_ts) / SIM_NEIGHBOR_STEP_SEC) % 5;
+    if (phase >= 0 && phase <= SIM_DYNAMIC_NEIGH_MAX) {
+        return phase;
+    }
+    return 0;
 }
 
 void sim_init(void) {
@@ -32,9 +53,9 @@ void sim_init(void) {
     g_sim_status.txpower = 30;
     g_sim_status.freq = 5800000;
     
-    // Initialize neighbors
-    g_sim_status.neigh_num = 3;
-    for (int i = 0; i < g_sim_status.neigh_num; i++) {
+    // Initialize neighbor slots; online count is driven by timer state machine.
+    g_sim_status.neigh_num = 0;
+    for (int i = 0; i < SIM_DYNAMIC_NEIGH_MAX; i++) {
         g_sim_status.msg[i].node_id = i + 2; // Neighbors start from ID 2
         g_sim_status.msg[i].rssi = 60;
         g_sim_status.msg[i].snr = 25;
@@ -45,14 +66,25 @@ void sim_init(void) {
         g_sim_status.msg[i].time_jitter = 5;
         g_sim_status.msg[i].noise = 90;
     }
+    g_sim_start_ts = time(NULL);
+    g_last_neigh_num = -1;
+    g_sim_initialized = 1;
     
     printf("[SIM] Simulation initialized.\n");
 }
 
 void sim_update_status(void) {
+    int target_neigh_num = sim_get_target_neigh_num();
+
     // Simulate dynamic changes
     g_sim_status.tx += get_random_int(100, 1000);
     g_sim_status.rx += get_random_int(100, 1000);
+    g_sim_status.neigh_num = target_neigh_num;
+
+    if (g_last_neigh_num != target_neigh_num) {
+        printf("[SIM] Dynamic neighbor state switched: %d online\n", target_neigh_num);
+        g_last_neigh_num = target_neigh_num;
+    }
     
     for (int i = 0; i < g_sim_status.neigh_num; i++) {
         // Vary RSSI slightly
@@ -73,15 +105,33 @@ void sim_update_status(void) {
         // Update time jitter
         g_sim_status.msg[i].time_jitter = get_random_int(1, 20);
     }
+
+    // Clear offline slots to avoid stale values leaking into debug displays.
+    for (int i = g_sim_status.neigh_num; i < SIM_DYNAMIC_NEIGH_MAX; i++) {
+        g_sim_status.msg[i].rssi = 0;
+        g_sim_status.msg[i].snr = 0;
+        g_sim_status.msg[i].mcs = 0;
+        g_sim_status.msg[i].good = 0;
+        g_sim_status.msg[i].bad = 0;
+        g_sim_status.msg[i].ucds = 0;
+        g_sim_status.msg[i].time_jitter = 0;
+        g_sim_status.msg[i].noise = 0;
+    }
 }
 
 void sim_get_route_info(struct routetable *route_msg) {
+    if (!g_sim_initialized) {
+        sim_init();
+    }
     // For now, just return static route info or implement dynamic if needed
     // In a real scenario, we would update routing tables based on neighbor connectivity
     memcpy(route_msg, &g_sim_route, sizeof(struct routetable));
 }
 
 void sim_get_veth_info(struct mgmt_send *self_msg) {
+    if (!g_sim_initialized) {
+        sim_init();
+    }
     sim_update_status();
     memcpy(self_msg, &g_sim_status, sizeof(struct mgmt_send));
 }
@@ -123,6 +173,34 @@ void sim_set_param(const char *buffer, int buflen, int type) {
         char cmd[256];
         sprintf(cmd, "sed -i \"s/bw .*/bw %d/g\" /etc/node_xwg", g_sim_status.bw);
         system(cmd);
+    }
+
+    if (ntohs(hmsg->mgmt_type) & MGMT_SET_UNICAST_MCS) {
+        MCS_INIT = sparam->mgmt_virt_unicast_mcs;
+        printf("[SIM] Unicast MCS set to %d\n", sparam->mgmt_virt_unicast_mcs);
+
+        char cmd[256];
+        sprintf(cmd, "sed -i \"s/mcs .*/mcs %d/g\" /etc/node_xwg", sparam->mgmt_virt_unicast_mcs);
+        system(cmd);
+    }
+
+    if (ntohs(hmsg->mgmt_type) & MGMT_SET_WORKMODE) {
+        Smgmt_net_work_mode *wm = &sparam->mgmt_net_work_mode;
+        NET_WORKMOD_INIT = wm->NET_work_mode;
+        printf("[SIM] Workmode set to %d (fh_len=%d)\n", wm->NET_work_mode, wm->fh_len);
+
+        char cmd[256];
+        sprintf(cmd, "sed -i \"s/workmode .*/workmode %d/g\" /etc/node_xwg", wm->NET_work_mode);
+        system(cmd);
+
+        if (wm->NET_work_mode == 4) {
+            sprintf(cmd,
+                "sed -i \"s/select_freq1 .*/select_freq1 %u/; s/select_freq2 .*/select_freq2 %u/; s/select_freq3 .*/select_freq3 %u/; s/select_freq4 .*/select_freq4 %u/\" /etc/node_xwg",
+                wm->hop_freq_tb[0], wm->hop_freq_tb[1], wm->hop_freq_tb[2], wm->hop_freq_tb[3]);
+            system(cmd);
+            printf("[SIM] Adaptive freqs: %u %u %u %u\n",
+                wm->hop_freq_tb[0], wm->hop_freq_tb[1], wm->hop_freq_tb[2], wm->hop_freq_tb[3]);
+        }
     }
     
     if (ntohs(hmsg->mgmt_type) & MGMT_SET_TEST_MODE) {
@@ -183,8 +261,9 @@ void sim_set_param(const char *buffer, int buflen, int type) {
         memcpy((uint8_t*)&sparam + offset, buffer, buflen);
     }
     
-    printf("[SIM] Bulk param update. Freq: %d, Power: %d, BW: %d\n", 
-           ntohl(sparam.mgmt_mac_freq), ntohs(sparam.mgmt_mac_txpower), sparam.mgmt_mac_bw);
+        printf("[SIM] Bulk param update. Freq: %d, Power: %d, BW: %d, MCS: %d\n", 
+            ntohl(sparam.mgmt_mac_freq), ntohs(sparam.mgmt_mac_txpower), sparam.mgmt_mac_bw,
+            sparam.mgmt_virt_unicast_mcs);
     
     g_sim_status.freq = ntohl(sparam.mgmt_mac_freq);
     g_sim_status.txpower = ntohs(sparam.mgmt_mac_txpower);
@@ -193,6 +272,7 @@ void sim_set_param(const char *buffer, int buflen, int type) {
     FREQ_INIT = g_sim_status.freq;
     POWER_INIT = g_sim_status.txpower;
     BW_INIT = g_sim_status.bw;
+    MCS_INIT = sparam.mgmt_virt_unicast_mcs;
 
     // Also update config files using system calls if needed
     char cmd[256];
@@ -203,6 +283,9 @@ void sim_set_param(const char *buffer, int buflen, int type) {
     system(cmd);
     
     sprintf(cmd, "sed -i \"s/bw .*/bw %d/g\" /etc/node_xwg", g_sim_status.bw);
+    system(cmd);
+
+    sprintf(cmd, "sed -i \"s/mcs .*/mcs %d/g\" /etc/node_xwg", sparam.mgmt_virt_unicast_mcs);
     system(cmd);
  }
 

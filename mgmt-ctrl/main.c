@@ -13,6 +13,7 @@
 #include "sqlite_unit.h"
 #include "gpsget.h"
 #include "sim_heartbeat.h"
+#include "audio_uart.h"
 //#pragma pack(1)
 
 
@@ -34,9 +35,11 @@ void SetupSignal()
 int main() {
     printf("Hello, World!\n");
 
-    sim_init();//初始化测试数据
     SetupSignal();//忽略SIGPIPE信号，防止写socket时对方关闭导致程序崩溃
     mgmt_mysql_init();
+    if (sim_get_mode()) {
+        sim_init(); // 初始化仿真邻居与链路状态
+    }
     ui_fd = uart_init();
     if(ui_fd == -1){
         printf("Failed to initialize UART.\n");
@@ -44,14 +47,17 @@ int main() {
     }
     sqliteinit();
     Create_Thread(mgmt_get_msg,NULL);//状态上报
-	Create_Thread(mgmt_recv_web,NULL);//将网页配置的参数通过netlink传递给mgmt模块
+	//Create_Thread(mgmt_recv_web,NULL);//将网页配置的参数通过netlink传递给mgmt模块
 	Create_Thread(mgmt_recv_msg,NULL);
 	Create_Thread(sqlite_set_param,NULL);//参数设置
 	Create_Thread(gps_Thread,NULL);//gps数据获取
     
     Create_Thread(get_ui_Thread,(void*)ui_fd);
 	Create_Thread(write_ui_Thread,(void*)ui_fd);
-
+    //Create_Thread(audio_thread,NULL);
+    //Create_Thread(play_audio_thread,NULL);
+    Create_Thread(thread_report_test,NULL);//定时上报给上位机的线程
+    Create_Thread(mgmt_recv_from_qkwg,NULL);//接收来自上位机软件的消息
 
     while(1){
 		sleep(10);

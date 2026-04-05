@@ -217,6 +217,8 @@ static int sqlite_set_userinfo_callback(void *NotUsed, int argc, char **argv, ch
     return 0;
 }
 
+static int parse_mesh_int(const char *name, const char *text, int *out);
+
 static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, char **azColName) {
     
     char *zErrMsg = 0;
@@ -253,7 +255,9 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
     {
         if(0 == strcmp(argv[0],"m_txpower"))
         {
-            sscanf(argv[1],"%d",&m_power);
+			if (!parse_mesh_int("m_txpower", argv[1], &m_power)) {
+				goto reset_mesh_state;
+			}
             mparam->mgmt_mac_txpower = htons((uint16_t)m_power);
             //网管上下发的功率，到每个通道时需要查表才能精确的补偿到每个通道都是下发的功率
             meshinfo.m_txpower = mparam->mgmt_mac_txpower;
@@ -275,14 +279,13 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
         }
         else if(0 == strcmp(argv[0],"rf_freq"))
 		{
-            sscanf(argv[1], "%d", &(mparam->mgmt_mac_freq));	
-			 //g_radio_param.g_rf_freq=mparam->mgmt_mac_freq;
-            mparam->mgmt_mac_freq = htonl(mparam->mgmt_mac_freq);		
-			meshinfo.rf_freq=mparam->mgmt_mac_freq;		
+			if (!parse_mesh_int("rf_freq", argv[1], &m_freq)) {
+				goto reset_mesh_state;
+			}
+			/* 内部缓存统一使用主机序，真正下发到内核前再做 htonl。 */
+			meshinfo.rf_freq = (uint32_t)m_freq;
 			//isset = TRUE;
 			meshinfo.freq_isset=1;
-
-			sscanf(argv[1], "%d", &(m_freq));
 			meshinfo.sys_freq=m_freq;
 //			printf("get freq:%d  \r\n",m_freq);
 			memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
@@ -294,7 +297,9 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
         else if(0 == strcmp(argv[0],"m_chanbw"))
 		{
 			//mhead->mgmt_type |= MGMT_SET_BANDWIDTH;
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_chanbw", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             mparam->mgmt_mac_bw = (uint8_t)temp;
              //g_radio_param.g_chanbw=mparam->mgmt_mac_bw;
 			//g_radio_param.g_chanbw=mparam->mgmt_mac_bw;
@@ -332,7 +337,9 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
         else if(0 == strcmp(argv[0],"m_rate"))
 		{
 			//mhead->mgmt_type |= MGMT_SET_UNICAST_MCS;
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_rate", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             mparam->mgmt_virt_unicast_mcs = (uint8_t)temp;
 			//g_radio_param.g_rate=mparam->mgmt_virt_unicast_mcs;
 			meshinfo.m_rate=mparam->mgmt_virt_unicast_mcs;
@@ -340,7 +347,7 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 			
 			meshinfo.rate_isset=1;
 			
-			sscanf(argv[1], "%d", &(m_rate));
+			m_rate = temp;
 			meshinfo.sys_rate=m_rate;
 			if(m_rate<0)
 			{
@@ -363,65 +370,86 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 		}
 		else if(0 == strcmp(argv[0],"m_bcastmode"))
 		{
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_bcastmode", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_bcastmode = (uint8_t)temp;
 			printf("bcast mode=%d\r\n",meshinfo.m_bcastmode);		
 		}
         else if(0 == strcmp(argv[0],"workmode"))//
         {
-            sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("workmode", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             mparam->mgmt_net_work_mode.NET_work_mode = (uint8_t)temp;
             meshinfo.workmode = mparam->mgmt_net_work_mode.NET_work_mode;
             meshinfo.workmode_isset=1;
         }
         else if(0 == strcmp(argv[0],"m_route"))
         {
-            sscanf(argv[1],"%d",&temp);
+			if (!parse_mesh_int("m_route", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_route=(uint8_t)temp;
             meshinfo.route_isset=1;
         }
         else if(0 == strcmp(argv[0],"m_slot_len"))
         {
-            sscanf(argv[1],"%d",&temp);
+			if (!parse_mesh_int("m_slot_len", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_slot_len=(uint8_t)temp;
             meshinfo.slot_isset=1;
         }
         else if(0 == strcmp(argv[0],"m_trans_mode"))
         {
-            sscanf(argv[1],"%d",&(meshinfo.m_trans_mode));
+			if (!parse_mesh_int("m_trans_mode", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
+			meshinfo.m_trans_mode=temp;
             meshinfo.m_trans_mode=htons(meshinfo.m_trans_mode);
             meshinfo.trans_mode_isset=1;
         }
         else if(0 == strcmp(argv[0],"m_select_freq1"))
 		{
 			//mhead->mgmt_type |= MGMT_SET_UNICAST_MCS;
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_select_freq1", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_select_freq_1 = temp;
 			//g_radio_param.g_select_freq_1=meshinfo.m_select_freq_1;
 			meshinfo.select_freq_isset=1;
 		}
         else if(0 == strcmp(argv[0],"m_select_freq2"))
 		{
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_select_freq2", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_select_freq_2 = temp;
 			meshinfo.select_freq_isset=1;
 		}
         else if(0 == strcmp(argv[0],"m_select_freq3"))
 		{
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_select_freq3", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_select_freq_3 = temp;
 			meshinfo.select_freq_isset=1;
 		}
         else if(0 == strcmp(argv[0],"m_select_freq4"))
 		{
-			sscanf(argv[1], "%d", &temp);
+			if (!parse_mesh_int("m_select_freq4", argv[1], &temp)) {
+				goto reset_mesh_state;
+			}
             meshinfo.m_select_freq_4 = temp;
 			meshinfo.select_freq_isset=1;
 		}
         else if(0 == strcmp(argv[0],"power_level"))
 		{
 			int level = 0;
-			sscanf(argv[1], "%d", &level);
+			if (!parse_mesh_int("power_level", argv[1], &level)) {
+				goto reset_mesh_state;
+			}
 			meshinfo.power_level = (uint8_t)level;
 			meshinfo.sys_power_level = level;
 			meshinfo.power_level_isset = 1;
@@ -429,7 +457,9 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 		else if(0 == strcmp(argv[0],"power_attenuation"))
 		{
 			int attenuation = 0;
-			sscanf(argv[1], "%d", &attenuation);
+			if (!parse_mesh_int("power_attenuation", argv[1], &attenuation)) {
+				goto reset_mesh_state;
+			}
 			meshinfo.power_attenuation = (uint8_t)attenuation;
 			meshinfo.sys_power_attenuation = attenuation;
 			meshinfo.power_attenuation_isset = 1;
@@ -437,7 +467,9 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 		else if(0 == strcmp(argv[0],"rx_channel_mode"))
 		{
 			int rx_mode = 0;
-			sscanf(argv[1], "%d", &rx_mode);
+			if (!parse_mesh_int("rx_channel_mode", argv[1], &rx_mode)) {
+				goto reset_mesh_state;
+			}
 			if (rx_mode < 0) {
 				rx_mode = 0;
 			} else if (rx_mode > 4) {
@@ -447,7 +479,8 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 			meshinfo.sys_rx_channel_mode = rx_mode;
 			meshinfo.rx_channel_mode_isset = 1;
 		}
-        /*  meshInfo表中各参数的state值置0  */
+	reset_mesh_state:
+		/*  meshInfo表中各参数的state值置0  */
 		snprintf(updateSql, sizeof(updateSql), "UPDATE meshInfo SET state = '0' WHERE name = '%s';" \
 					,argv[0]);
         //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
@@ -469,12 +502,27 @@ static int sqlite_set_meshinfo_callback(void *NotUsed, int argc, char **argv, ch
 
 }
 
+static int parse_mesh_int(const char *name, const char *text, int *out)
+{
+	if (out == NULL) {
+		return 0;
+	}
+	if (text == NULL || sscanf(text, "%d", out) != 1) {
+		printf("[sqlite_unit] invalid %s '%s', skip this field\r\n",
+			   name ? name : "(unknown)",
+			   text ? text : "(null)");
+		return 0;
+	}
+	return 1;
+}
+
 
 int sqlite_set_param(void){
     char *zErrMsg = 0;
     int rc;
 	int opt=1;
     bool isset=FALSE;
+	bool had_changes = FALSE;
 	int ret;
 	static uint32_t s_fix_freq=0;   //   定频中心频率
 	s_fix_freq=FREQ_INIT;
@@ -515,6 +563,7 @@ int sqlite_set_param(void){
     setsockopt(SOCKET_BCAST_SEND,SOL_SOCKET,SO_BROADCAST,&opt,sizeof(opt));
 
     while(1){
+		had_changes = FALSE;
 
         //sqlite3_busy_handler(g_psqlitedb,busyHandle,NULL);
 		sqlite3_busy_timeout(g_psqlitedb, 3000);//ssq
@@ -522,7 +571,7 @@ int sqlite_set_param(void){
     	sqlite3_exec(g_psqlitedb,"SELECT * FROM userInfo;",sqlite_set_userinfo_callback, 0, &zErrMsg);
     	sqlite3_exec(g_psqlitedb,"SELECT * FROM meshInfo;",sqlite_set_meshinfo_callback, 0, &zErrMsg);
 
-        if(meshinfo.m_bcastmode==1){ 
+		if(meshinfo.m_bcastmode==1){ 
         
             bzero(buffer, buflen);
             mhead->mgmt_head = htons(HEAD);
@@ -567,8 +616,8 @@ int sqlite_set_param(void){
                 {
                     isset=TRUE;
                     mhead->mgmt_type |=MGMT_SET_FREQUENCY;
-                    mparam->mgmt_mac_freq=meshinfo.rf_freq;
-                    s_fix_freq=mparam->mgmt_mac_freq;  
+					mparam->mgmt_mac_freq = htonl(meshinfo.rf_freq);
+					s_fix_freq = meshinfo.rf_freq;
                 }
             }
             if(meshinfo.chanbw_isset)
@@ -596,7 +645,7 @@ int sqlite_set_param(void){
                 {
                     /* 定频 */
                     mhead->mgmt_type |= MGMT_SET_FREQUENCY;
-                    mparam->mgmt_mac_freq=s_fix_freq;
+					mparam->mgmt_mac_freq = htonl(s_fix_freq);
 
                     sprintf(cmd,
                             "sed -i \"s/workmode .*/workmode %d/g\" /etc/node_xwg",1);
@@ -664,7 +713,8 @@ int sqlite_set_param(void){
                     break;
                 }
                 sprintf(cmd,
-					"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
+					"grep -q '^router ' /etc/node_xwg && sed -i \"s/router .*/router %d/g\" /etc/node_xwg || echo \"router %d\" >> /etc/node_xwg",
+				meshinfo.m_route,
 				meshinfo.m_route);		
 				system(cmd);
             }
@@ -694,6 +744,7 @@ int sqlite_set_param(void){
 				mhead->mgmt_type = htons(mhead->mgmt_type);
 				mhead->mgmt_keep = htons(mhead->mgmt_keep);
 				mgmt_netlink_set_param(buffer, buflen,NULL);	
+				had_changes = TRUE;
 				sleep(1);
 				if (!persist_test_db()) {
 					printf("[sqlite_unit] persist test.db failed after meshinfo change\n");
@@ -748,7 +799,7 @@ int sqlite_set_param(void){
 				isset=TRUE;
 				mhead->mgmt_type |= MGMT_SET_FREQUENCY;
 				//mhead->mgmt_type = htons(mhead->mgmt_type);
-				mparam->mgmt_mac_freq=meshinfo.rf_freq;
+				mparam->mgmt_mac_freq = htonl(meshinfo.rf_freq);
 			}
 			if(meshinfo.chanbw_isset)
 			{
@@ -780,6 +831,7 @@ int sqlite_set_param(void){
 				mhead->mgmt_type = htons(mhead->mgmt_type);
 				mhead->mgmt_keep = htons(mhead->mgmt_keep);
 				mgmt_netlink_set_param(buffer, buflen,NULL);
+				had_changes = TRUE;
 				if (!persist_test_db()) {
 					printf("[sqlite_unit] persist test.db failed during meshinfo multicast sync\n");
 				}
@@ -787,7 +839,12 @@ int sqlite_set_param(void){
 
         }
 
-        sleep(5);
+		/* 保留硬件下发稳定等待，仅压缩软件层空轮询时间。 */
+		if (had_changes) {
+			usleep(200000);
+		} else {
+			usleep(1000000);
+		}
     }
 
     sqlite3_close(g_psqlitedb);

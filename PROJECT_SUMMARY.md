@@ -80,6 +80,10 @@ flowchart LR
   - 接收网管参数设置消息并调用 `mgmt_netlink_set_param` 下发
 - 网管消息线程：`mgmt_recv_msg`（select 多端口事件循环）
   - 同时监听多 UDP/TCP 端口：广播参数、拓扑、控制、成员详情请求、文件更新等
+- 上位机接收线程：`mgmt_recv_from_qkwg`（上位机→设备配置下发）
+  - 接收上位机设备/信道配置指令，完成参数边界校验、本地配置文件更新、netlink 下发与 DB 持久化
+- 上位机上报线程：`thread_report_test`（设备→上位机状态上报）
+  - 周期采集设备自检、网络连通性、信道参数与链路评估指标，按协议封包后回传上位机
 - DB 参数下发线程：`sqlite_set_param`（Web→设备下发入口之二）
   - 轮询 SQLite 中 state=1 的参数变更，构造 `Smgmt_set_param` 下发并持久化 DB
 - GPS线程：`gps_Thread`

@@ -1,21 +1,16 @@
 #ifndef MGMT_TYPES_H_
 #define MGMT_TYPES_H_
 #include <stdint.h>
-#include <asm/byteorder.h>
 #include <linux/types.h>
-#include <linux/if_ether.h>
+#include <net/ethernet.h>
+#include <netinet/if_ether.h>
+
 
 #include "wg_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
-#define LINUX
-
-#ifdef LINUX
-#include <netinet/in.h>
-#define PACKED __attribute__((packed))
-#endif
 
 #define Radio_SWARM_S2
 #define Radio_QK 
@@ -60,7 +55,10 @@ typedef unsigned char UINT8;
 #define NET_SIZE 56   
 
 #define POWER_TABLE_SIZE 71
-
+#define DT_MIN_FREQ			225
+#define DT_MAX_FREQ			4000
+#define QK_WG_PORT   10000 //20所上位机
+#define QK_CJ_PORT   7075
 
 typedef enum
 {
@@ -554,7 +552,7 @@ struct mgmt_send {
 	ob_state_part1 mac_information_part1; //mac层监管控信息part1
 	DEVICE_SC_STATUS_REPORT amp_infomation;     //功放数据结构
 
-};
+};//用来接收内核通过netlink返回回来的参数信息
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t mgmt_head; // 管理帧头标识（固定头）
@@ -630,7 +628,7 @@ typedef struct __attribute__((__packed__)) {
 	Smgmt_phy mgmt_phy;                                // PHY参数
 	uint8_t  u8Slotlen;                                // 时隙长度
 	uint8_t resv;                                      // 预留
-}Smgmt_set_param;
+}Smgmt_set_param;//本机全量下发结构体
 typedef struct __attribute__((__packed__)) {
 	uint32_t mgmt_ip;                                // 节点IP
 	uint16_t mgmt_id;                                // 节点ID
@@ -650,7 +648,7 @@ typedef struct __attribute__((__packed__)) {
 	uint16_t mgmt_mac_work_mode;                     // MAC工作模式
 	double   mgmt_longitude;                         // 经度
 	double   mgmt_latitude;                          // 纬度
-}Smgmt_param;
+}Smgmt_param;//网关/多点分发结构
 
 typedef struct ST_NBIFNO{
 	int nbid1;		//邻居ID1

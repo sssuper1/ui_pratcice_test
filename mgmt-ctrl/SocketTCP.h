@@ -13,9 +13,9 @@
 
 typedef struct STcpClient {
 	INT32 sockfd;
-	BOOL useful;
-	INT32 srcip;
-	struct timeval time;
+	BOOL useful;//表示该结构体是否被使用，TRUE表示正在使用，FALSE表示未使用
+	INT32 srcip;//存储连接的客户端的IP地址，便于后续管理和通信
+	struct timeval time;//记录连接的时间，便于实现连接超时等功能
 } TcpClient;
 
 

@@ -11,6 +11,187 @@
 
 #pragma pack(push, 1)
 
+
+// 1：场景服务器 4：业务模拟 7：宽台
+typedef enum{
+    DEVICE_TYPE_CJ=1,               
+    DEVICE_TYPE_YW=4,
+    DEVICE_TYPE_KD=7
+}DEVICE_TYPE;
+
+// 报文头
+typedef struct{
+    uint8_t     head;               //报文标识  240
+    uint8_t     len;                //报头长度   30
+    uint16_t    info_len;           //正文长度： 包括应用层头和应用层正文的长度
+    uint8_t     packet_type;        //报文类型
+    uint8_t     activity_type;      // 活动类型  1：试验，2：训练，3：演习
+    uint16_t    send_type;          //发送端类型标识  1：场景服务器 4：业务模拟  7：宽台
+    uint16_t    send_id;            //发送端设备ID标识
+    uint32_t    timestamp_1;        //时间编码 (秒)
+    uint16_t    timestamp_2;        //时间编码 (毫秒)
+    uint8_t     packet_type_2;      //报文子类
+    uint8_t     flag;               //报文压缩标志
+    uint16_t    recv_type;          //接收端类型标识  1：场景服务器 4：业务模拟 7：宽台
+    uint16_t     recv_id;            //接收端设备ID     0
+    uint32_t    seq;                //包序号
+    uint32_t    data_len;           //数据域长度
+    
+ 
+
+}APP_HEAD;
+
+// 设备参数配置指令数据
+typedef struct {
+    uint8_t routing_prot;           //设备路由协议
+    uint8_t work_mode;             //工作模式
+    uint8_t decision_mode;           //决策模式
+    uint16_t freq_set;              //自适应选频频率集                           
+    uint8_t cluster_config;        //簇首配置
+    uint8_t center_node;            //自主决策中心节点配置
+    double  lon;                    /* 经度 */
+    double  lat;                    /* 纬度 */
+    double  height;                 /* 高度 */
+    uint8_t network_role;           //网络角色        
+    uint8_t reserved[4];
+}DEVICE_PARAM_SET;
+
+// 业务通道1参数配置指令数据
+typedef struct {
+    uint8_t     wave_type;              //波形体制  1:ofdm
+    uint8_t     mcs_mode;               //调制编码方式  0-7 
+    uint8_t     work_mode;              //工作模式    1:定频  4 自适应选频  6 硬件测试模式
+    uint8_t     kylb;                   //空域滤波  0：停用，1启用
+    uint8_t     bw;                     //带宽        
+    uint16_t    freq;                   //工作频率    225MHz-2.5GHz，
+    uint8_t     hop_rate;               //跳频速率    
+    uint16_t     select_freq1;            //自适应选频1
+    uint16_t     select_freq2;            //自适应选频2
+    uint16_t     select_freq3;            //自适应选频3
+    uint16_t     select_freq4;            //自适应选频4
+    uint8_t     transmode;             //传输模式
+    uint8_t     multi_access;           //多址方式
+    uint8_t     tx_power;               //发射功率      0：2.5W、1：5W、2：10 W、3：20W
+    uint8_t     tx_power_atten;         //发射功率衰减   0-90dB衰减，步进1dB
+    uint8_t     slot_len;               //时隙长度
+    uint8_t     sync_mode;              //    0：内同步，1：外同步
+    uint8_t     reserved[4];  
+
+}CHANNEL_PARAM_SET;
+
+/* 设备网络状态 */
+typedef struct{
+    uint8_t dev_type;            /* 设备类型 1：宽带设备,2：设备*/
+    uint16_t dev_id;             /* 设备ID */
+    uint8_t connectivity;        /* 联通状态 1：在网,其它：未联通*/
+    uint8_t kylb;               /* 空域滤波 0：开启 1：关闭*/
+    uint8_t zsyxp;               /* 自适应选频 0：开启 1：关闭*/
+    uint8_t neighbor_info[64];   /* 邻居信息 */
+    double  longitude;           /* 经度 */
+    double  latitude;            /* 纬度 */
+    double  height;             /* 高度 */
+    uint8_t reserved[4];             /* 预留字段 */    
+}DEVCIE_NETWORK;
+
+//设备指标评估数据
+typedef struct{
+    uint8_t ber[64];                    //误码率    
+    uint32_t throughput[64];             //吞吐量
+    int8_t  snr[64];                    //
+    uint32_t  total_tx_cnt[64];         //总发射信息计数
+    uint32_t  total_rx_cnt[64];         //总接收信息计数
+   // uint8_t   reserved[4];
+}DEVICE_EVALUATION_REPORT;
+
+//设备状态信息数据
+typedef struct 
+{
+    uint8_t routing_prot;           //设备路由协议
+    uint8_t work_mode;             //工作模式
+    uint8_t decision_mode;           //决策模式
+    uint16_t freq_set;              //自适应选频频率集                           
+    uint8_t cluster_config;        //簇首配置
+    uint8_t center_node;            //自主决策中心节点配置
+    double  lon;                    /* 经度 */
+    double  lat;                    /* 纬度 */
+    double  height;                 /* 高度 */
+    uint8_t network_role;           //网络角色        
+    uint8_t reserved[4];
+}DEVICE_STATUS_REPORT;
+
+
+// 业务通道1状态信息上报
+typedef struct {
+    uint8_t     wave_type;              //波形体制  1:ofdm
+    uint8_t     mcs_mode;               //调制编码方式  0-7 
+    uint8_t     work_mode;              //工作模式    1:定频  4 自适应选频  6 硬件测试模式
+    uint8_t     kylb;                   //空域滤波  0：停用，1启用
+    uint8_t     bw;                     //带宽        
+    uint16_t    freq;                   //工作频率    225MHz-2.5GHz，
+    uint8_t     hop_rate;               //跳频速率    
+    uint16_t     select_freq1;            //自适应选频1
+    uint16_t     select_freq2;            //自适应选频2
+    uint16_t     select_freq3;            //自适应选频3
+    uint16_t     select_freq4;            //自适应选频4
+    uint8_t     transmode;             //传输模式
+    uint8_t     multi_access;           //多址方式
+    uint8_t     tx_power;               //发射功率      0：2.5W、1：5W、2：10 W、3：20W
+    uint8_t     tx_power_atten;         //发射功率衰减   0-90dB衰减，步进1dB
+    uint8_t     slot_len;               //时隙长度
+    uint8_t     sync_mode;              //同步模式
+    uint8_t     reserved[4];    
+
+}CHANNEL_PARAM_REPORT;
+
+// 波形软件自检状态数据
+typedef struct {
+    uint8_t dev_type;            /* 设备类型 */
+    uint8_t dev_id;              /* 设备编号 */
+    uint8_t info_processing;     /* 综合信息处理模块 */
+    uint8_t rf_frontend;         /* 射频前端 */
+    uint8_t clock_source;        /* 时钟频率源 */
+    uint8_t power_module;        /* 电源变换模块 */
+    uint8_t battery;             /* 便携电池 */
+    uint8_t interf_cancel;       /* 干扰对消设备 */
+    uint8_t reserved;           /* 预留字段 */
+
+}SELFCHECK_STATUS_INFO;
+
+// 配置指令执行应答数据
+typedef struct {
+    uint8_t type;                       //指令类型      0：设备参数配置指令，2：业务通道1配置指令
+    uint8_t state;                      //执行情况      0：成功
+}PARAM_SET_ACK;
+
+// 控制指令--试验状态
+typedef enum{
+    CMD_STATE_READY=1,                    //试验准备
+    CMD_STATE_START,
+    CMD_STATE_PAUSE,
+    CMD_STATE_CONTINUE,
+    CMD_STATE_END
+
+}CMD_STATE;
+
+typedef enum{
+    CMD_SELF_TEST            =2,
+    CMD_SEFL_TEST_ACK        =3,
+    CMD_EXPERIMENT_CTRL      = 4,           // 试验控制指令 (4)
+    CMD_EXPERIMENT_ACK       = 5,           //试验控制指令应答 (5)
+    CMD_SELF_TEST_REPORT     = 40,          //宽带台自检状态回传 (40)  
+    CMD_NET_STATUS_REPORT    = 41,          //宽带台设备网络状态上报 (41)
+    CMD_DEV_CONFIG          = 42,           //宽带台设备参数配置指令 (42)
+    CMD_CH1_CONFIG          = 43,           //带台业务通道1参数配置指令 (43)
+    CMD_CONFIG_ACK          = 44,           //宽带台配置指令执行应答 (44)
+    CMD_METRICS_REPORT      = 45,           //宽带台设备指标评估 (45)
+    CMD_SELF_TEST_INFO      = 46,           //宽带台设备自检状态信息 (46)
+    CMD_DEV_STATUS_INFO     = 47,           //宽带台设备状态信息 (47)
+    CMD_CH1_STATUS_INFO     = 48,           //宽带台业务通道1状态信息 (48)
+    CMD_ROUTING_TABLE_READ  = 49,           //宽带台设备路由表回读请求 (49)
+    CMD_ROUTING_STATE       = 50,           //设备路由状态(50)
+}DEVICE_CMD_TYPE;
+
+
 typedef enum
 {
     KYLB_MODE_OPEN=0,

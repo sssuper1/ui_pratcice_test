@@ -62,6 +62,7 @@ double longitude;
 double latitude;
 char version[20];
 
+
 uint8_t SELFID;
 uint32_t SELFIP;
 uint8_t SELFIP_s[4];
@@ -145,6 +146,25 @@ double htond(double val) {
 	tmp = htobe64(tmp);
 	memcpy(&dval, &tmp, sizeof(tmp));
 	return dval;
+}
+
+/*
+ * For historical compatibility some peers still send little-endian direct struct bytes.
+ * Prefer network order, but fall back to raw value when only raw falls into valid range.
+ */
+static uint16_t decode_u16_compat(uint16_t raw, uint16_t min_valid, uint16_t max_valid)
+{
+	uint16_t net = ntohs(raw);
+	bool net_ok = (net >= min_valid && net <= max_valid);
+	bool raw_ok = (raw >= min_valid && raw <= max_valid);
+
+	if (net_ok) {
+		return net;
+	}
+	if (raw_ok) {
+		return raw;
+	}
+	return net;
 }
 
 uint16_t ipCksum(void* ip, int len) {
@@ -389,14 +409,17 @@ void mgmt_mysql_init(void){
 		printf("SOCKET_MGMT create error\n");
 		exit(1);
 	}
+	//网管地面站
     S_GROUND_STD.sin_family = AF_INET;
     S_GROUND_STD.sin_addr.s_addr = inet_addr("192.168.2.1");
     S_GROUND_STD.sin_port = htons(MGMT_PORT);
 
+	//网关地面站广播地址
     S_GROUND_WG.sin_family = AF_INET;
 	S_GROUND_WG.sin_addr.s_addr = inet_addr("255.255.255.255");
 	S_GROUND_WG.sin_port = htons(WG_TX_UDP_PORT);
 
+	//邻居节点通信模板 / 子网广播
     S_OTHER_NODE.sin_family = AF_INET;
 	S_OTHER_NODE.sin_addr.s_addr = inet_addr("192.168.255.255");
 	S_OTHER_NODE.sin_port = htons(WG_RX_UDP_PORT);
@@ -430,11 +453,13 @@ void mgmt_mysql_init(void){
     SOCKET_UDP_WG = CreateUDPServer(WG_RX_UDP_PORT);
 	//测试打印：
 	printf("创建SOCKET_UDP_WG的socket,端口为WG_RX_UDP_PORT=%d\n", WG_RX_UDP_PORT);
-
+	//绑定到网卡上
 	if (setsockopt(SOCKET_UDP_WG, SOL_SOCKET, SO_BINDTODEVICE, ifname, 4) < 0) {
 		printf("SOCKET_UDP_WG bindtodevice error\n");
 		exit(1);
 	}
+
+	//设置广播权限
 	if (setsockopt(SOCKET_UDP_WG, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on)) < 0) {
 		printf("SOCKET_UDP_WG BROADCAST error\n");
 		exit(1);
@@ -449,7 +474,7 @@ void mgmt_mysql_init(void){
 		TCPCLIENT_WG[i].time.tv_sec = 0;
 		TCPCLIENT_WG[i].time.tv_usec = 0;
 	}
-	TCPCLIENTCOND_WG = CreateEvent();//创建条件变量
+	TCPCLIENTCOND_WG = CreateEvent();//创建条件变量，
 	TCPCLIENTMUTEX_WG = CreateLock();//创建互斥锁
 
 
@@ -603,8 +628,14 @@ void mgmt_get_msg(void){
 		node_num = 1;           // 初始化节点计数为1（本节点）
 		offset = sizeof(ethernet_header_t) + sizeof(ip_header) + sizeof(udp_header) + sizeof(Smgmt_header) + sizeof(Snodefind);
 		// ===== 从内核获取网络信息 =====
-		mgmt_netlink_get_info(0, MGMT_CMD_GET_ROUTE_INFO, NULL, (char*)&route_msg);   // 获取路由表信息
-		mgmt_netlink_get_info(0, MGMT_CMD_GET_VETH_INFO, NULL, (char*)&self_msg);    // 获取虚拟网卡信息
+		if (mgmt_netlink_get_info(0, MGMT_CMD_GET_ROUTE_INFO, NULL, (char*)&route_msg) == NULL) {
+			printf("[MGMT WARN] get route info failed, keep last route snapshot\r\n");
+		}
+		if (mgmt_netlink_get_info(0, MGMT_CMD_GET_VETH_INFO, NULL, (char*)&self_msg) == NULL) {
+			printf("[MGMT WARN] get veth info failed, skip this cycle to avoid clearing neighbors\r\n");
+			sleep(1);
+			continue;
+		}
 		
 		// ===== 设置报文序列号和节点ID =====
 		self_msg.seqno = seqno;        // 设置自身消息序列号
@@ -630,7 +661,7 @@ void mgmt_get_msg(void){
 					ipaddr = (int*)(buf + offset); 
 					*ipaddr = htonl(0xc0a80200 + self_msg.msg[i].node_id);
 					offset += sizeof(int);
-				/* 存下邻居信息 */
+					/* 存下邻居信息 */
 					neighid_info[i]=self_msg.msg[i].node_id;
 					mcs_all[i]=self_msg.msg[i].mcs;  //存放组网的所有mcs
 					//rssi_all[i]=self_msg.msg[i].rssi;
@@ -844,6 +875,7 @@ void mgmt_get_msg(void){
 
 						for(k=1;k<33;k++)
 						{
+							//判断该节点是否为2跳邻居，如果是2跳邻居则更新系统信息表中的id2X和ip2X字段
 							if(self_msg.mac_information_part1.nbr_list[k] == LinkSt_h2)
 							{
 								memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
@@ -1085,7 +1117,7 @@ void send_topo_request() {
 	ret = setsockopt(SOCKET_MGMT, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
 	if (ret < 0) {
 		perror("setsockopt(SO_BROADCAST) failed");
-		return -1;
+		return;
 	}
 	int sret = SendUDPBrocast(SOCKET_MGMT, buffer, len, &toNeigh);
 }
@@ -1374,7 +1406,7 @@ void mgmt_recv_msg(void){
 	struct in_addr selfIP;
 	selfIP.s_addr = selfip;
 
-    stInData bc_systeminfoupdate;
+    stInData bc_systeminfoupdate;//数据库的存储结构体name,value,state,lib
 	memset((char*)&bc_systeminfoupdate,0,sizeof(bc_systeminfoupdate));
 
     // 添加性能优化变量
@@ -1754,7 +1786,7 @@ void mgmt_recv_msg(void){
                     memcpy(&gate_addr, &from, sizeof(from));
                     //将拓扑信息目的IP替换成广播包中携带的网关IP
                     gate_addr.sin_addr.s_addr = htonl(trptr->srcIp);
-                    gate_addr.sin_port = htons(WG_RX_UDP_PORT);//7600端口为什么用htons？而不是htonl
+                    gate_addr.sin_port = htons(WG_RX_UDP_PORT);
                     break;
                 }
 			    case MGMT_TOPOLOGY_INFO:
@@ -2228,6 +2260,921 @@ void updateData_init(void){
 }
 
 
+/* 设备网络状态上报 */
+void report_device_network_status(void* data,int seq,int port,uint16_t type)
+{
+	char buffer[1024];
+	
+	//static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+
+	DEVCIE_NETWORK dev_net;
+	memset(&dev_net,0,sizeof(DEVCIE_NETWORK));		
+	memcpy(&dev_net,(DEVCIE_NETWORK*)data,sizeof(DEVCIE_NETWORK));
+
+
+	int app_len=sizeof(APP_HEAD);
+	int dev_net_len=sizeof(DEVCIE_NETWORK);
+	
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+dev_net_len;
+	app_head.packet_type=CMD_NET_STATUS_REPORT;    //宽带台设备网络状态上报
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=dev_net_len;
+	app_head.recv_type=type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+
+	dev_net.dev_type=1;
+	dev_net.dev_id=SELFID;
+	
+	dev_net.longitude=110.123123;
+	dev_net.latitude=30.123123;
+	dev_net.height=1500;
+
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,&dev_net,dev_net_len);
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",port);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+dev_net_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+
+}
+
+/* 设备指标评估数据 
+*/
+void report_device_evolution(DEVICE_EVALUATION_REPORT *dev_evolution,int seq,int port,uint16_t type)
+{
+	//static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	char buffer[1024];
+
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+	
+	int app_len=sizeof(APP_HEAD);
+	int dev_evolution_len=sizeof(DEVICE_EVALUATION_REPORT);
+
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+dev_evolution_len;
+	app_head.packet_type=CMD_METRICS_REPORT;    //宽带台设备网络状态上报
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=dev_evolution_len;
+	app_head.recv_type=type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,dev_evolution,dev_evolution_len);
+
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",port);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+dev_evolution_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+
+
+}
+
+/* 自检指令应答 */
+void report_self_test_ack(SELFCHECK_STATUS_INFO *sc_status,int seq,uint16_t type)
+{
+	int broadcast_enable = 1;
+	int cli_s;
+	char buffer[1024];
+
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+	
+	int app_len=sizeof(APP_HEAD);
+	int dev_sc_len=sizeof(SELFCHECK_STATUS_INFO);
+
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+dev_sc_len;
+	app_head.packet_type=CMD_SEFL_TEST_ACK;    //宽带台设备自检状态信息
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;   //宽带电台
+
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=dev_sc_len;
+	app_head.recv_type=type;    
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,sc_status,dev_sc_len);
+
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",QK_CJ_PORT);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+dev_sc_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+
+}
+
+/* 配置指令执行应答 
+len:数据域长度
+type：指令类型      0：设备参数配置指令，2：业务通道1配置指令
+recv_type:接收端表示
+*/
+void report_device_param_set_ack(int seq,uint8_t type,uint16_t recv_type)
+{
+	char buffer[1024];
+	
+	//static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+
+	PARAM_SET_ACK param_ack;
+	memset(&param_ack,0,sizeof(PARAM_SET_ACK));		
+
+	// DEVICE_PARAM_SET device_param_set;
+	// memset(&device_param_set,0,sizeof(DEVICE_PARAM_SET));		
+
+	int app_len=sizeof(APP_HEAD);
+	int ack_len=sizeof(PARAM_SET_ACK);
+	
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+ack_len;
+	app_head.packet_type=CMD_CONFIG_ACK;    //宽带台配置指令执行应答
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=ack_len;
+	app_head.recv_type=recv_type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+	// device_param_set.routing_prot=;
+	param_ack.type=type;   
+	param_ack.state=0;
+
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,&param_ack,ack_len);
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",QK_WG_PORT);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+ack_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+
+}
+
+/* 设备自检状态信息数据 */
+void report_dev_selfcheck_status(DEVICE_SC_STATUS_REPORT *sc_info,int seq,uint16_t type)
+{
+	//static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	char buffer[1024];
+
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+	
+	int app_len=sizeof(APP_HEAD);
+	int dev_sc_len=sizeof(DEVICE_SC_STATUS_REPORT);
+
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+dev_sc_len;
+	app_head.packet_type=CMD_SELF_TEST_INFO;    //宽带台设备自检状态信息
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;   //宽带电台
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=dev_sc_len;
+	app_head.recv_type=type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,sc_info,dev_sc_len);
+
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",QK_WG_PORT);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+dev_sc_len,&addr);
+	//printf("send selftest status_len %d \r\n",send_len);
+	close(cli_s);
+
+}
+
+/* 设备状态信息数据 */
+void report_device_status(DEVICE_STATUS_REPORT *dev_status,int seq,int port,uint16_t type)
+{
+	//	static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	char buffer[1024];
+
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+	
+	int app_len=sizeof(APP_HEAD);
+	int dev_status_len=sizeof(DEVICE_STATUS_REPORT);
+
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+dev_status_len;
+	app_head.packet_type=CMD_DEV_STATUS_INFO;    //宽带台设备自检状态信息
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=dev_status_len;
+	app_head.recv_type=type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,dev_status,dev_status_len);
+
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",port);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+dev_status_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+
+}
+// 业务通道1状态信息上报
+void report_device_ch_param(CHANNEL_PARAM_REPORT *ch_param,int seq,int port,uint16_t type)
+{
+	//static int seq=0;
+	int broadcast_enable = 1;
+	int cli_s;
+	char buffer[1024];
+
+	APP_HEAD app_head;
+	memset(&app_head,0,sizeof(APP_HEAD));		
+	
+	int app_len=sizeof(APP_HEAD);
+	int ch_param_len=sizeof(CHANNEL_PARAM_REPORT);
+
+	app_head.head=240;
+	app_head.len=app_len;
+	app_head.info_len=app_len+ch_param_len;
+	app_head.packet_type=CMD_CH1_STATUS_INFO;    //宽带台设备自检状态信息
+	app_head.activity_type=1;
+	app_head.send_type=DEVICE_TYPE_KD;
+	app_head.send_id=SELFID;
+	app_head.seq=seq;
+	app_head.data_len=ch_param_len;
+	app_head.recv_type=type;    //4 :业务模拟软件
+	app_head.recv_id=0;
+	app_head.info_len = htons(app_head.info_len);
+	app_head.send_type = htons(app_head.send_type);
+	app_head.send_id = htons(app_head.send_id);
+	app_head.timestamp_1 = htonl(app_head.timestamp_1);
+	app_head.timestamp_2 = htons(app_head.timestamp_2);
+	app_head.recv_type = htons(app_head.recv_type);
+	app_head.recv_id = htons(app_head.recv_id);
+	app_head.seq = htonl(app_head.seq);
+	app_head.data_len = htonl(app_head.data_len);
+
+	memcpy(buffer,&app_head,app_len);
+	memcpy(buffer+app_len,ch_param,ch_param_len);
+
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));	
+	cli_s=createUdpClient(&addr,"192.168.2.255",port);
+	
+	setsockopt(cli_s, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable));
+
+	int send_len=SendUDPClient(cli_s,(char*)&buffer,app_len+ch_param_len,&addr);
+	//printf("send status_len %d \r\n",len);
+	close(cli_s);
+}
+
+
+void mgmt_recv_from_qkwg(void)
+{
+	int ret;
+	int yw_len=0;
+	char yw_buf[1024];
+	struct sockaddr_in from;
+	static int yw_seq=0;
+	// static uint8_t s_sync_mode;
+
+	bool isset=FALSE;
+
+	char selfAddr[4] = {0xc0,0xa8,0x02,0x01};
+	uint32_t selfip;
+	selfAddr[3]=SELFID;
+	memcpy(&selfip,selfAddr,sizeof(uint32_t));
+
+	int qk_s = CreateUDPServer(QK_WG_PORT);
+	if (qk_s <= 0)
+	{
+		printf("ERROR: create socket_qk_wg \n");
+		exit(1);
+	}
+
+	int app_len=sizeof(APP_HEAD);
+
+	socklen_t socklen = sizeof(struct sockaddr_in);
+
+	printf("create thread : get msg from 20 yw_web\r\n");
+
+	// 设备参数配置指令数据
+	DEVICE_PARAM_SET dev_param_set;
+	memset(&dev_param_set,0,sizeof(DEVICE_PARAM_SET));
+	
+	/* 业务通道1参数配置指令数据 */
+	CHANNEL_PARAM_SET 	ch_param_set;
+	memset(&ch_param_set,0,sizeof(CHANNEL_PARAM_SET));
+
+
+	uint8_t cmd[200];
+	INT8 buffer[sizeof(Smgmt_header) + sizeof(Smgmt_set_param)];
+	INT32 buflen = sizeof(Smgmt_header) + sizeof(Smgmt_set_param);
+	memset(buffer,0,buflen);
+	Smgmt_header* mhead = (Smgmt_header*)buffer;
+	Smgmt_set_param* mparam = (Smgmt_set_param*)mhead->mgmt_data;
+
+
+	static uint8_t s_wokrmode=1;
+
+	// bzero(buffer, buflen);
+	// memset(cmd,0,sizeof(cmd));
+	// mhead->mgmt_head = htons(HEAD);
+	// mhead->mgmt_len = sizeof(Smgmt_set_param);
+	// mhead->mgmt_type = 0;
+ 	// mhead->mgmt_keep = 0;
+
+
+	while(TRUE)
+	{
+		memset(cmd,0,sizeof(cmd));
+		mhead->mgmt_head = htons(HEAD);
+		mhead->mgmt_len = sizeof(Smgmt_set_param);
+		mhead->mgmt_type = 0;
+		mhead->mgmt_keep = 0;
+
+
+		yw_len=recvfrom(qk_s, yw_buf, BUFLEN, 0, (struct sockaddr*)&from, &socklen);
+		if(yw_len<=0||selfip==from.sin_addr.s_addr)
+		{
+			continue;
+		}
+		//buflen = RecvUDPClient(qk_s, buffer, BUFLEN, &from, &socklen);
+		
+		//printf("[YW_20] len %d \r\n",yw_len);
+		APP_HEAD app_head;
+		memcpy(&app_head,yw_buf,app_len);
+		app_head.info_len = ntohs(app_head.info_len);
+		app_head.send_type = ntohs(app_head.send_type);
+		app_head.send_id = ntohs(app_head.send_id);
+		app_head.timestamp_1 = ntohl(app_head.timestamp_1);
+		app_head.timestamp_2 = ntohs(app_head.timestamp_2);
+		app_head.recv_type = ntohs(app_head.recv_type);
+		app_head.recv_id = ntohs(app_head.recv_id);
+		app_head.seq = ntohl(app_head.seq);
+		app_head.data_len = ntohl(app_head.data_len);
+		yw_seq = app_head.seq;
+		//解析head信息
+
+		switch(app_head.packet_type)
+		{
+			case CMD_DEV_CONFIG:
+				
+				memset(&dev_param_set,0,sizeof(DEVICE_PARAM_SET));
+				memcpy(&dev_param_set,yw_buf+app_len,sizeof(DEVICE_PARAM_SET));
+				dev_param_set.freq_set = ntohs(dev_param_set.freq_set);
+				printf("recv device param set info \r\n");
+				// printf("---routing prot:%#x--- \r\n",dev_param_set.routing_prot);
+				// printf("---lon:%lf--- \r\n",dev_param_set.lon);
+				// printf("---lat:%lf--- \r\n",dev_param_set.lat);
+				// printf("---height:%lf--- \r\n",dev_param_set.height);
+				//printf("---network role:%d---\r\n",dev_param_set.work_mode);
+				/* set param  */ 
+
+				if(dev_param_set.routing_prot!=0x5a)
+				{
+					//set route
+					switch(dev_param_set.routing_prot){
+						case KD_ROUTING_OLSR:
+							printf("set route olsr \r\n");
+							g_radio_param.g_route=KD_ROUTING_OLSR;
+							sprintf(cmd,
+								"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
+							KD_ROUTING_OLSR);		
+							system(cmd);
+							sleep(1);		
+							ret = system("/home/root/cs_olsr.sh");
+							if(ret == -1) printf("change olsr failed\r\n");
+							break;
+							
+						case KD_ROUTING_AODV:
+							// aodv
+							printf("set route aodv \r\n");
+							sprintf(cmd,
+								"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
+							KD_ROUTING_AODV);		
+							system(cmd);
+							sleep(1);
+							ret = system("/home/root/cs_aodv.sh");
+							if(ret == -1) printf("change batman failed\r\n");
+							
+							g_radio_param.g_route=KD_ROUTING_AODV;
+							break;
+							
+						case KD_ROUTING_CROSS_LAYER:  //batman
+							printf("set route batman \r\n");
+							g_radio_param.g_route=KD_ROUTING_CROSS_LAYER;
+							sprintf(cmd,
+								"sed -i \"s/router .*/router %d/g\" /etc/node_xwg",
+							KD_ROUTING_CROSS_LAYER);		
+							system(cmd);
+							sleep(1);
+							ret = system("/home/root/cs_batman.sh");
+							if(ret == -1) printf("change batman failed\r\n");
+							break;
+							
+						default:
+							break;
+					}
+
+					// updateData_meshinfo_qk("m_route",dev_param_set.routing_prot);
+				}
+
+				/* report ack to yw_wg */
+				report_device_param_set_ack(yw_seq,0,DEVICE_TYPE_YW);
+			break;
+			
+			case CMD_CH1_CONFIG:
+				
+				memset(&ch_param_set,0,sizeof(CHANNEL_PARAM_SET));
+				memcpy(&ch_param_set,yw_buf+app_len,sizeof(CHANNEL_PARAM_SET));//偏移APP_HEAD长度，获取业务通道参数配置指令数据
+				ch_param_set.freq = decode_u16_compat(ch_param_set.freq, DT_MIN_FREQ, DT_MAX_FREQ);
+				ch_param_set.select_freq1 = decode_u16_compat(ch_param_set.select_freq1, DT_MIN_FREQ, DT_MAX_FREQ);
+				ch_param_set.select_freq2 = decode_u16_compat(ch_param_set.select_freq2, DT_MIN_FREQ, DT_MAX_FREQ);
+				ch_param_set.select_freq3 = decode_u16_compat(ch_param_set.select_freq3, DT_MIN_FREQ, DT_MAX_FREQ);
+				ch_param_set.select_freq4 = decode_u16_compat(ch_param_set.select_freq4, DT_MIN_FREQ, DT_MAX_FREQ);
+				printf("recv channel param set info \r\n");
+				/* set param  */ 
+				// printf("---mcs:%d---\r\n",ch_param_set.mcs_mode);
+				// printf("---workmode:%d---\r\n",ch_param_set.work_mode);
+				// printf("---bw:%d---\r\n",ch_param_set.bw);
+				// printf("---freq:%d---\r\n",ch_param_set.freq);
+				// printf("---select freq_1 %d freq_2 %d freq-3 %d freq_4 %d ---\r\n",
+				// ch_param_set.select_freq1,ch_param_set.select_freq2,ch_param_set.select_freq3,ch_param_set.select_freq4);
+
+
+				/* set channel param */
+				if(ch_param_set.mcs_mode!=0x5a)
+				{
+					//set mcs 0-7
+					isset=TRUE;
+					mhead->mgmt_type |= MGMT_SET_UNICAST_MCS;
+					mparam->mgmt_virt_unicast_mcs=ch_param_set.mcs_mode;   
+					
+					// memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
+					// sprintf(stsysteminfodata.name,"%s","m_rate");
+					// sprintf(stsysteminfodata.value,"%d",ch_param_set.mcs_mode);
+					// stsysteminfodata.state[0] = '1';
+					// updateData_systeminfo(stsysteminfodata);
+					
+					updateData_systeminfo_qk("m_rate",ch_param_set.mcs_mode);
+					// updateData_meshinfo_qk("m_rate",ch_param_set.mcs_mode);
+					g_radio_param.g_rate=ch_param_set.mcs_mode;
+				}
+				if(ch_param_set.transmode!=0x5a)
+				{
+					isset=TRUE;
+					mhead->mgmt_type |= MGMT_SET_TEST_MODE;
+					mparam->mgmt_mac_work_mode=htons(ch_param_set.transmode);
+
+					// updateData_meshinfo_qk("m_trans_mode",ch_param_set.transmode);
+
+					g_radio_param.g_trans_mode=ch_param_set.transmode;
+				}
+				if(ch_param_set.bw!=0x5a)
+				{
+					// set bw 
+					isset=TRUE;
+					mhead->mgmt_type |= MGMT_SET_BANDWIDTH;
+					mparam->mgmt_mac_bw=ch_param_set.bw;
+
+					// memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
+					// sprintf(stsysteminfodata.name,"%s","m_chanbw");
+					// sprintf(stsysteminfodata.value,"%d",ch_param_set.bw);
+					// stsysteminfodata.state[0] = '1';
+					// updateData_systeminfo(stsysteminfodata);
+					
+					// updateData_meshinfo_qk("m_chanbw",ch_param_set.bw);
+					updateData_systeminfo_qk("m_chanbw",ch_param_set.bw);
+					g_radio_param.g_chanbw=ch_param_set.bw;
+				}
+				if(ch_param_set.kylb==1)
+				{
+					printf("[YW DEBUG]open kylb \r\n");
+					if(s_wokrmode==4)
+					{
+						break;
+					}
+					isset=TRUE;
+					mhead->mgmt_type |= MGMT_SET_WORKMODE;
+					mparam->mgmt_net_work_mode.NET_work_mode=5;
+					sprintf(cmd,
+								"sed -i \"s/kylb .*/kylb %d/g\" /etc/node_xwg",
+							KYLB_MODE_OPEN);		
+					system(cmd);
+					s_wokrmode=5;
+					// updateData_meshinfo_qk("workmode",5);
+				}
+				else
+				{
+					printf("[YW DEBUG]close kylb \r\n");
+					// if(s_wokrmode==4)
+					// {
+					// 	break;
+					// }
+					sprintf(cmd,
+								"sed -i \"s/kylb .*/kylb %d/g\" /etc/node_xwg",
+							KYLB_MODE_CLOSE);		
+					system(cmd);					
+				}
+				if(ch_param_set.work_mode==4)
+				{
+					//自适应选频
+					isset=TRUE;
+					mhead->mgmt_type |= MGMT_SET_WORKMODE;
+					//mhead->mgmt_type = htons(mhead->mgmt_type);
+					mparam->mgmt_net_work_mode.NET_work_mode=ch_param_set.work_mode;
+
+					printf("set workmode:%d \r\n",mparam->mgmt_net_work_mode.NET_work_mode);
+
+
+					//meshinfo.select_freq_isset=0;
+					printf("[YW_20] set select freq,freq1:%d,freq2:%d,freq3:%d，freq4:%d \r\n",
+								ch_param_set.select_freq1,ch_param_set.select_freq2,ch_param_set.select_freq3,ch_param_set.select_freq4);
+					mparam->mgmt_net_work_mode.fh_len=4;
+					mparam->mgmt_net_work_mode.hop_freq_tb[0]=ch_param_set.select_freq1;
+					mparam->mgmt_net_work_mode.hop_freq_tb[1]=ch_param_set.select_freq2;
+					mparam->mgmt_net_work_mode.hop_freq_tb[2]=ch_param_set.select_freq3;
+					mparam->mgmt_net_work_mode.hop_freq_tb[3]=ch_param_set.select_freq4;
+
+					s_wokrmode=4;
+
+					sprintf(cmd, "sed -i \"s/workmode .*/workmode %d/; \
+								s/select_freq1 .*/select_freq1 %d/; \
+								s/select_freq2 .*/select_freq2 %d/; \
+								s/select_freq3 .*/select_freq3 %d/; \
+								s/select_freq4 .*/select_freq4 %d/\" /etc/node_xwg", 
+							WORK_MODE_TYPE_ZSYXP, ch_param_set.select_freq1, ch_param_set.select_freq2, ch_param_set.select_freq3, ch_param_set.select_freq4);
+					system(cmd);
+					
+					// updateData_meshinfo_qk("workmode",4);
+					// updateData_meshinfo_qk("m_select_freq1",ch_param_set.select_freq1);	
+					// updateData_meshinfo_qk("m_select_freq2",ch_param_set.select_freq2);	
+					// updateData_meshinfo_qk("m_select_freq3",ch_param_set.select_freq3);	
+					// updateData_meshinfo_qk("m_select_freq4",ch_param_set.select_freq4);	
+
+				}
+				else if(ch_param_set.work_mode==1)
+				{
+						isset=TRUE;
+						mhead->mgmt_type |= MGMT_SET_WORKMODE;
+						mparam->mgmt_net_work_mode.NET_work_mode=1;
+
+						
+						mhead->mgmt_type |= MGMT_SET_FREQUENCY;
+						printf("[YW_20] freq %d\r\n",ch_param_set.freq);
+						if(ch_param_set.freq<DT_MIN_FREQ)
+						{
+							printf("[YW_20] WARNING freq <225 \r\n ");
+							ch_param_set.freq=DT_MIN_FREQ;
+						}
+						if(ch_param_set.freq>DT_MAX_FREQ)
+						{
+							printf("[YW_20] WARNING freq > 4000 \r\n ");
+							ch_param_set.freq=DT_MAX_FREQ;
+
+						}
+						mparam->mgmt_mac_freq=htonl(ch_param_set.freq);
+
+						// memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
+						// sprintf(stsysteminfodata.name,"%s","rf_freq");
+						// sprintf(stsysteminfodata.value,"%d",ch_param_set.freq);
+						// stsysteminfodata.state[0] = '1';
+						// updateData_systeminfo(stsysteminfodata);
+
+						g_radio_param.g_workmode=1;
+						g_radio_param.g_rf_freq=ch_param_set.freq;
+
+						sprintf(cmd,
+							"sed -i \"s/workmode .*/workmode %d/g\" /etc/node_xwg",
+							WORK_MODE_TYPE_DP);		
+						system(cmd);
+						s_wokrmode=1;
+					// updateData_meshinfo_qk("workmode",1);
+					// updateData_meshinfo_qk("rf_freq",ch_param_set.freq);
+				}
+				if(ch_param_set.tx_power!=0x5a)
+				{
+					// set tx_power				
+					//isset=TRUE;
+					// mhead->mgmt_type |= MGMT_SET_POWER;
+					// mparam->mgmt_mac_txpower=htons(ch_param_set.tx_power);
+
+/* 更新 systeminfo ,同步显示*/
+					// memset((char*)&stsysteminfodata,0,sizeof(stsysteminfodata));
+					// sprintf(stsysteminfodata.name,"%s","m_txpower");
+					// sprintf(stsysteminfodata.value,"%d",39-m_power);
+					// stsysteminfodata.state[0] = '1';
+					// updateData_systeminfo(stsysteminfodata);
+
+				}
+				if(ch_param_set.slot_len!=0x5a)
+				{
+					//set slot len
+					isset=TRUE;
+					mhead->mgmt_keep |= MGMT_SET_SLOTLEN;
+					mparam->u8Slotlen=ch_param_set.slot_len;
+
+				// updateData_meshinfo_qk("m_slot_len",ch_param_set.slot_len);
+					g_radio_param.g_slot_len=ch_param_set.slot_len;
+				}
+				if(ch_param_set.sync_mode!=0x5a)
+				{
+					/*同步模式 0：内同步，1：外同步*/
+					printf("[YW DEBUG]sync mode %d \r\n",ch_param_set.sync_mode);
+					sprintf(cmd,
+						"sed -i \"s/sync_mode .*/sync_mode %d/g\" /etc/node_xwg",
+						ch_param_set.sync_mode);		
+					system(cmd);
+
+				}
+
+
+				if(isset)
+				{
+					isset=FALSE;
+					if(buffer == NULL) {     
+						printf("ERROR: buffer is NULL\n");         
+						continue;
+       				 }
+					mhead->mgmt_type = htons(mhead->mgmt_type);
+					mhead->mgmt_keep = htons(mhead->mgmt_keep);
+					mgmt_netlink_set_param(buffer, buflen,NULL);	
+					sleep(1);
+					if (!persist_test_db()) {
+						printf("[mgmt_transmit] persist test.db failed after channel param update\n");
+					}
+				}				
+				/* report ack to wg */
+				report_device_param_set_ack(yw_seq,2,DEVICE_TYPE_YW);
+
+			break;
+			
+			default:
+			break;
+		}
+
+		usleep(50000);
+	}
+
+}
+
+void thread_report_test(void)
+{
+
+	static int seq=0;
+	uint8_t i=0;
+	uint8_t id_index=0;
+
+
+	struct mgmt_send self_msg;
+	/* 设备指标评估信息 */
+	DEVICE_EVALUATION_REPORT dev_evo;
+	memset(&dev_evo,0,sizeof(DEVICE_EVALUATION_REPORT));
+/* test */
+
+
+	/* 设备自检状态信息 */
+	DEVICE_SC_STATUS_REPORT sc_info;
+	memset(&sc_info,0,sizeof(DEVICE_SC_STATUS_REPORT));
+
+	/* 填充设备网络状态信息 */
+	DEVCIE_NETWORK dev_net_info;
+	memset(&dev_net_info,0,sizeof(DEVCIE_NETWORK));
+	dev_net_info.dev_type=1;
+	dev_net_info.dev_id=SELFID;
+	dev_net_info.zsyxp=1;
+	dev_net_info.kylb=1; 
+	dev_net_info.longitude=110.123123;
+	dev_net_info.latitude=29.123123;
+	dev_net_info.height=1500;
+
+	DEVICE_STATUS_REPORT dev_status;
+	memset(&dev_status,0,sizeof(DEVICE_STATUS_REPORT));
+	dev_status.routing_prot=g_radio_param.g_route;
+	dev_status.work_mode=g_radio_param.g_workmode;
+	memset(dev_status.reserved,100,4);
+
+
+	Node_Xwg_Pairs param_pairs[] = {
+        {"channel", 0, 0},{"power", 0, 0},{"bw", 0, 0},{"mcs", 0, 0},
+        {"macmode", 0, 0},{"slotlen", 0, 0},{"router", 0, 0},{"workmode", 0, 0},
+		{"select_freq1", 0, 0},{"select_freq2", 0, 0},{"select_freq3", 0, 0},{"select_freq4", 0, 0},
+		{"sync_mode",0,0},{"kylb",0,0}
+    };
+
+	// read_node_xwg_file("node_xwg",pairs,7);
+
+	// 填充业务通道1状态信息
+	CHANNEL_PARAM_REPORT ch_param;
+	memset(&ch_param,0x5a,sizeof(CHANNEL_PARAM_REPORT));
+	ch_param.wave_type=1;
+	ch_param.multi_access=0x02;
+	ch_param.sync_mode=0;
+	printf("start thread :report info to yw\r\n");
+
+
+	memset(&self_msg,0,sizeof(self_msg));
+	while(1)
+	{
+		read_node_xwg_file("/etc/node_xwg",param_pairs,MAX_XWG_PAIRS);
+
+		mgmt_netlink_get_info(0, MGMT_CMD_GET_VETH_INFO, NULL, (char*)&self_msg);
+
+		//上报给业务模拟系统
+		//自检信息
+			memcpy(&sc_info,&self_msg.amp_infomation,sizeof(sc_info));
+			report_dev_selfcheck_status(&sc_info,seq,DEVICE_TYPE_YW);
+
+		// 设备网络状态信息	
+			for(i=0;i<NET_SIZE;i++)
+			{
+				if(self_msg.msg[i].mcs!=0x0f)
+				{
+					dev_net_info.connectivity=1;
+					id_index=self_msg.msg[i].node_id;
+					dev_net_info.neighbor_info[id_index]=	1;
+				}
+
+			}
+			if((uint8_t)get_int_value((void*)param_pairs,"workmode")==4)
+			{
+				dev_net_info.zsyxp=0;
+			}
+			else if((uint8_t)get_int_value((void*)param_pairs,"workmode")==5)
+			{
+				dev_net_info.kylb=0;
+			}
+			report_device_network_status((void*)&dev_net_info,seq,QK_WG_PORT,DEVICE_TYPE_YW);
+
+
+		//设备指标评估数据
+			
+			for(i=0;i<NET_SIZE;i++)
+			{
+				dev_evo.snr[i]=self_msg.msg[i].snr;
+				//dev_evo.ber[i]=self_msg.msg[i].
+			}
+
+			report_device_evolution(&dev_evo,seq,QK_WG_PORT,DEVICE_TYPE_YW);
+		//设备状态信息数据
+			report_device_status(&dev_status,seq,QK_WG_PORT,DEVICE_TYPE_YW);
+		// 业务通道1状态信息上报
+			ch_param.transmode=(uint8_t)get_int_value((void*)param_pairs,"macmode");
+			ch_param.mcs_mode=(uint8_t)get_int_value((void*)param_pairs,"mcs");
+			ch_param.slot_len=(uint8_t)get_int_value((void*)param_pairs,"slotlen");
+			ch_param.freq=(uint16_t)get_int_value((void*)param_pairs,"channel");
+			ch_param.sync_mode=(uint8_t)get_int_value((void*)param_pairs,"sync_mode");
+			ch_param.kylb=0; //空域滤波默认关闭 
+			ch_param.work_mode=(uint8_t)get_int_value((void*)param_pairs,"workmode");
+			if((uint8_t)get_int_value((void*)param_pairs,"kylb")==KYLB_MODE_OPEN) 
+			{
+				ch_param.kylb=1;
+			}
+			ch_param.bw=(uint8_t)get_int_value((void*)param_pairs,"bw");
+			
+			ch_param.select_freq1=get_int_value((void*)param_pairs,"select_freq1");
+			ch_param.select_freq2=get_int_value((void*)param_pairs,"select_freq2");
+			ch_param.select_freq3=get_int_value((void*)param_pairs,"select_freq3");
+			ch_param.select_freq4=get_int_value((void*)param_pairs,"select_freq4");
+
+			// ch_param.select_freq1=1500;
+			// ch_param.select_freq2=1500;
+			// ch_param.select_freq3=1500;
+			// ch_param.select_freq4=1500;
+
+
+
+			ch_param.tx_power=1;   //需要更新
+			ch_param.tx_power_atten=10; //需要更新
+
+			//printf("业务通道1状态信息上报: \r\n");
+			// printf("[YW REPORT] workmode:%d \r\n",ch_param.work_mode);
+			// printf("[YW REPORT] bw:%d \r\n",ch_param.bw);
+			// printf("[YW REPORT] freq:%d \r\n",ch_param.freq);
+			// printf("[YW REPORT] mcs:%d \r\n",ch_param.mcs_mode);
+			// printf("[YW REPORT] slot_len:%d \r\n",ch_param.slot_len);
+
+			report_device_ch_param(&ch_param,seq,QK_WG_PORT,DEVICE_TYPE_YW);
+
+			seq++;
+			sleep(5);
+	}
+
+
+}
 
 void read_node_xwg_file(const char * filename,Node_Xwg_Pairs* xwg_info,int num_pairs)
 {
@@ -2241,6 +3188,10 @@ void read_node_xwg_file(const char * filename,Node_Xwg_Pairs* xwg_info,int num_p
         xwg_info[i].found = 0;
     }
 
+	/* Backward compatibility: some old node_xwg files repeat
+	 * "select_freq1" four times to represent 1~4 slots. */
+	int select_freq_legacy_idx = 0;
+
     char line[1024];
     while(fgets(line,sizeof(line),file)){
         //移除行尾的换行符
@@ -2249,11 +3200,22 @@ void read_node_xwg_file(const char * filename,Node_Xwg_Pairs* xwg_info,int num_p
         char *key = strtok(line," ");
         char *value_str = strtok(NULL, " ");
 
-        if(key !=NULL && value_str !=NULL)
+		if(key !=NULL && value_str !=NULL)
         {
+			const char *match_key = key;
+			char mapped_key[32] = {0};
+
+			if (strcmp(key, "select_freq1") == 0 && select_freq_legacy_idx < 4) {
+				/* First "select_freq1" -> select_freq1,
+				 * second -> select_freq2, third -> select_freq3, fourth -> select_freq4. */
+				snprintf(mapped_key, sizeof(mapped_key), "select_freq%d", select_freq_legacy_idx + 1);
+				match_key = mapped_key;
+				select_freq_legacy_idx++;
+			}
+
             for(int i=0;i<num_pairs;i++)
             {
-                if(strcmp(key,xwg_info[i].key)==0)
+				if(strcmp(match_key,xwg_info[i].key)==0)
                 {
                     memcpy(xwg_info[i].value,value_str,100);
                     xwg_info[i].found = 1;

@@ -234,10 +234,11 @@ char mgmt_netlink_set_param(char* buffer, int buflen, const char* header)
 			"sed -i \"s/mcs .*/mcs %d/g\" /etc/node_xwg",
 			sparam->mgmt_virt_unicast_mcs);
 		system(cmd);
-	}
-
-	nla_put_u8(msg, MGMT_ATTR_SET_UNICAST_MCS, sparam->mgmt_virt_unicast_mcs);
+		
+		nla_put_u8(msg, MGMT_ATTR_SET_UNICAST_MCS, sparam->mgmt_virt_unicast_mcs);
 		MCS_INIT = sparam->mgmt_virt_unicast_mcs;
+	}
+	
 	
 	if (ntohs(hmsg->mgmt_type) & MGMT_SET_MULTICAST_MCS) {
 		printf("设置MGMT_SET_MULTICAST_MCS参数%02x\n", sparam->mgmt_virt_multicast_mcs);
@@ -284,7 +285,7 @@ char mgmt_netlink_set_param(char* buffer, int buflen, const char* header)
 				{
 					sparam->mgmt_net_work_mode.fh_len ++;
 				}
-			}
+			}//观察到默认跳频表中非0的频点个数就是有效的跳频表长度，更新到结构体中
 		}
 		else if(sparam->mgmt_net_work_mode.NET_work_mode == FIX_FREQ_MODE)
 		{
@@ -480,7 +481,7 @@ char mgmt_netlink_set_param(char* buffer, int buflen, const char* header)
 
 	system("sync");
 
-	cb = nl_cb_alloc(NL_CB_DEFAULT);
+	cb = nl_cb_alloc(NL_CB_DEFAULT);//分配一个netlink回调结构体，用于接收内核的回复消息
 	if (!cb)
 	{
 	    printf("ERROR: nl_cb_alloc失败\n");
@@ -489,11 +490,11 @@ char mgmt_netlink_set_param(char* buffer, int buflen, const char* header)
 	}
 
 	nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, mgmt_netlink_param_callback, &opts);
-	nl_cb_err(cb, NL_CB_CUSTOM, print_error, NULL);
+	nl_cb_err(cb, NL_CB_CUSTOM, print_error, NULL);//设置错误回调函数
 
 	nl_recvmsgs(sock, cb);
 
-	nl_cb_put(cb);
+	nl_cb_put(cb);//释放回调结构体
 // 	ret = 0;
 // err_free_sock:
 // 	nl_socket_free(sock);
@@ -516,7 +517,7 @@ char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int 
 
 	struct nl_sock* sock;
 	struct nl_msg* msg;
-	struct nl_cb* cb;
+	struct nl_cb* cb;//回调函数结构体指针
 	int family;
 	uint8_t cmd[200];
 	char ret = -1;
@@ -525,7 +526,7 @@ char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int 
 		.nl_cmd = MGMT_CMD_SET_PARAM,
 		.remaining_header = NULL,
 		.static_header = header,
-	};
+	};//回调函数参数结构体初始化
 
 	memset(&sparam_for_set, 0, sizeof(sparam_for_set));
 	if(type == MGMT_SET_PARAM)
@@ -534,6 +535,7 @@ char mgmt_netlink_set_param_wg(char* buffer, int buflen, const char* header,int 
 		}
 	else if(type == MGMT_MULTIPOINT_SET)
 		{
+			//Smgmt_param结构体中的ip和id跳过。因为多点配置的ip在Smgmt_header中传入了。
 			memcpy((uint8_t*)&sparam_for_set + sizeof(uint32_t) + sizeof(uint16_t), buffer, buflen);
 		}
 	sparam = &sparam_for_set;
@@ -808,22 +810,26 @@ char* mgmt_netlink_get_info(int ifindex, uint8_t nl_cmd, const char* header, cha
         }
     }
 
-	struct nl_sock* sock;
-	struct nl_msg* msg;
-	struct nl_cb* cb;
+	struct nl_sock* sock;//netlink套接字
+	struct nl_msg* msg;//netlink消息体
+	struct nl_cb* cb;//netlink回调函数
 	int family;
 	struct print_opts opts = {
 		.read_opt = 0,
 		.nl_cmd = nl_cmd,
 		.remaining_header = remaining,
 		.static_header = header,
-	};
+	};//print_opts结构体用于存储回调函数需要的参数，包括读取选项、netlink命令、剩余的消息头部和静态消息头部。
 
 	sock = nl_socket_alloc();
 	if(!sock)
 		return NULL;
 	
-	genl_connect(sock);
+	if (genl_connect(sock) < 0) {
+		fprintf(stderr, "[MGMT ERROR] genl_connect failed\n");
+		nl_socket_free(sock);
+		return NULL;
+	}
 	family = genl_ctrl_resolve(sock, MGMT_NL_NAME);
 	if (family < 0) {
 		printf("family error\n");
@@ -847,11 +853,23 @@ char* mgmt_netlink_get_info(int ifindex, uint8_t nl_cmd, const char* header, cha
 	nla_put_u8(msg, MGMT_ATTR_NODEID, SELFID);
 	//printf("mgmt_netlink_get_info id %d\n",SELFID);
 
-	nl_send_auto_complete(sock, msg);
+	if (nl_send_auto_complete(sock, msg) < 0) {
+		fprintf(stderr, "[MGMT ERROR] nl_send_auto_complete failed, cmd=%u\n", nl_cmd);
+		nlmsg_free(msg);
+		nl_cb_put(cb);
+		nl_socket_free(sock);
+		return NULL;
+	}
 
 	nlmsg_free(msg);
 
-	nl_recvmsgs(sock, cb);
+	if (nl_recvmsgs(sock, cb) < 0) {
+		fprintf(stderr, "[MGMT ERROR] nl_recvmsgs failed, cmd=%u\n", nl_cmd);
+		nl_cb_put(cb);
+		nl_socket_free(sock);
+		return NULL;
+	}
+	nl_cb_put(cb);
 	
 err_free_sock:
 	nl_socket_free(sock);

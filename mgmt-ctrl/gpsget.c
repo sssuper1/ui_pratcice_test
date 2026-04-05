@@ -2,6 +2,49 @@
 #include "ui_get.h"
 #include <time.h>
 
+static int hex_to_u8(char c)
+{
+	if (c >= '0' && c <= '9') {
+		return c - '0';
+	}
+	if (c >= 'A' && c <= 'F') {
+		return c - 'A' + 10;
+	}
+	if (c >= 'a' && c <= 'f') {
+		return c - 'a' + 10;
+	}
+	return -1;
+}
+
+static int validate_nmea_checksum(const char *frame_start, const char *frame_end)
+{
+	const char *star;
+	unsigned char calc = 0;
+	int hi;
+	int lo;
+	// NMEA帧必须以 '$' 开始，以 "\r\n" 结尾，且至少包含一个 '*' 和两位校验码
+	if (frame_start == NULL || frame_end == NULL || frame_start[0] != '$' || frame_end <= frame_start + 1) {
+		return 0;
+	}
+	// 查找 '*' 字符，后面应该跟着两位十六进制数作为校验码
+	star = memchr(frame_start, '*', (size_t)(frame_end - frame_start));
+	if (star == NULL || (star + 2) >= frame_end) {
+		return 0;
+	}
+	// 计算从 '$' 到 '*' 之间所有字符的异或值
+	for (const char *p = frame_start + 1; p < star; ++p) {
+		calc ^= (unsigned char)(*p);
+	}
+	// 将计算的校验值与帧中提供的校验码进行比较
+	hi = hex_to_u8(star[1]);
+	lo = hex_to_u8(star[2]);
+	if (hi < 0 || lo < 0) {
+		return 0;
+	}
+	// 校验码是两位十六进制数，转换成一个字节后与计算的校验值比较
+	return calc == (unsigned char)((hi << 4) | lo);
+}
+
 
 GPS_INFO gps_info_uart;
 
@@ -104,7 +147,7 @@ void gps_getfrom_uart(int fd)
 			}
 			if(count >5)
 			{
-				 printf("error:fail to read gps from uart,reopen gps uart\r\n ");
+				printf("error:fail to read gps from uart,reopen gps uart\r\n ");
                 close(fd);
 				sleep(2);
 				while (1)
@@ -129,9 +172,29 @@ void gps_getfrom_uart(int fd)
 
 			int gps_size = sizeof(nema);
 			char print_gps[gps_size];
+
+			
 			char *gga_start = strstr(nema, "$GNGGA");
 
+
 			if(gga_start != NULL){
+				char *frame_end = strstr(gga_start, "\r\n");
+				if (frame_end == NULL) {
+					continue;
+				}
+				//
+				if (!validate_nmea_checksum(gga_start, frame_end)) {
+					static time_t last_checksum_notice = 0;
+					time_t now = time(NULL);
+					if (now - last_checksum_notice >= 30) {
+						last_checksum_notice = now;
+						printf("[GPS] drop invalid GNGGA checksum\r\n");
+					}
+					continue;
+				}
+
+				*frame_end = '\0';
+
 				// 使用 do...while(0) 包裹，方便在解析失败时用 break 安全跳出当前解析，去执行下方的 sleep(10)
 				do {
 					// 字段1: UTC时间
@@ -141,6 +204,9 @@ void gps_getfrom_uart(int fd)
 					
 					// 优化：直接用指针相减计算长度
 					int str1_len = str1 - (gga_start + 7);
+					if(str1_len <= 0 || str1_len >= sizeof(gps_info_uart.utc)){
+						memcpy(gps_info_uart.utc, "000000.000", 10);
+					}
 					memcpy(gps_info_uart.utc, gga_start + 7, str1_len);
 					convertUTCToBeijingTime(gps_info_uart.utc, gps_info_uart.bj_time); 
 					
@@ -148,12 +214,18 @@ void gps_getfrom_uart(int fd)
 					char* str2 = strchr(str1 + 1, ',');
 					if(str2 == NULL) break;
 					int str2_len = str2 - (str1 + 1);
+					if(str2_len <= 0 || str2_len >= sizeof(gps_info_uart.latitude)){
+						memcpy(gps_info_uart.latitude, "0000.0000", 9);
+					}
 					memcpy(gps_info_uart.latitude, str1 + 1, str2_len);
 					
 					// 字段3: 纬度方向
 					char* str3 = strchr(str2 + 1, ',');
 					if(str3 == NULL) break;
 					int str3_len = str3 - (str2 + 1);
+					if(str3_len <= 0 || str3_len >= 2){
+						gps_info_uart.lat_mode = '0';
+					}
 					memcpy(&gps_info_uart.lat_mode, str2 + 1, str3_len);
 					
 					// 计算纬度
@@ -167,12 +239,18 @@ void gps_getfrom_uart(int fd)
 					char* str4 = strchr(str3 + 1, ',');
 					if(str4 == NULL) break;
 					int str4_len = str4 - (str3 + 1);
+					if(str4_len <= 0 || str4_len >= sizeof(gps_info_uart.longitude)){
+						memcpy(gps_info_uart.longitude, "00000.0000", 10);
+					}
 					memcpy(gps_info_uart.longitude, str3 + 1, str4_len);
 					
 					// 字段5: 经度方向
 					char* str5 = strchr(str4 + 1, ',');
 					if(str5 == NULL) break;
 					int str5_len = str5 - (str4 + 1);
+					if(str5_len <= 0 || str5_len >= 2){
+						gps_info_uart.lon_mode = '0';
+					}
 					memcpy(&gps_info_uart.lon_mode, str4 + 1, str5_len);
 					
 					// 计算经度
@@ -186,6 +264,9 @@ void gps_getfrom_uart(int fd)
 					char* str6 = strchr(str5 + 1, ',');
 					if(str6 == NULL) break;
 					int str6_len = str6 - (str5 + 1);
+					if(str6_len <= 0 || str6_len >= sizeof(gps_info_uart.position_status)){
+						memcpy(gps_info_uart.position_status, "0", 1);
+					}
 					memcpy(&gps_info_uart.position_status, str5 + 1, str6_len);
 					
 					// 如果未定位，退出当前解析
@@ -197,24 +278,36 @@ void gps_getfrom_uart(int fd)
 					char* str7 = strchr(str6 + 1, ',');
 					if(str7 == NULL) break;
 					int str7_len = str7 - (str6 + 1);
+					if(str7_len <= 0 || str7_len >= sizeof(gps_info_uart.satellites_used)){
+						memcpy(gps_info_uart.satellites_used, "00", 2);
+					}
 					memcpy(gps_info_uart.satellites_used, str6 + 1, str7_len);
 					
 					// 字段8: 水平精度因子
 					char* str8 = strchr(str7 + 1, ',');
 					if(str8 == NULL) break;
 					int str8_len = str8 - (str7 + 1);
+					if(str8_len <= 0 || str8_len >= sizeof(gps_info_uart.hdop)){
+						memcpy(gps_info_uart.hdop, "0.0", 3);
+					}
 					memcpy(gps_info_uart.hdop, str7 + 1, str8_len);
 					
 					// 字段9: 海拔高度
 					char* str9 = strchr(str8 + 1, ',');
 					if(str9 == NULL) break;
 					int str9_len = str9 - (str8 + 1);
+					if(str9_len <= 0 || str9_len >= sizeof(gps_info_uart.altitude)){
+						memcpy(gps_info_uart.altitude, "0.0", 3);
+					}
 					memcpy(gps_info_uart.altitude, str8 + 1, str9_len);
 					
 					// 字段10: 海拔高度单位
 					char* str10 = strchr(str9 + 1, ',');
 					if(str10 == NULL) break;
 					int str10_len = str10 - (str9 + 1);
+					if(str10_len <= 0 || str10_len >= 2){
+						gps_info_uart.altitude_unit = '0';
+					}
 					memcpy(&gps_info_uart.altitude_unit, str9 + 1, str10_len);
 					
 					// 打印GPS信息

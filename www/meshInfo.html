@@ -30,6 +30,7 @@ function jump() {
 if(typeof data[1] === "undefined"||typeof data[9] === "undefined"){
 	xhr.open('GET', "cgi-bin/cmeshInfo", true);//打开后端文件的路径
     	xhr.send();//向后端发送请求
+	return;
 }
 
 	
@@ -110,6 +111,9 @@ else{
 	document.getElementById("power_level").value = data[16].childNodes[0].nodeValue;
 	document.getElementById("power_attenuation").value = data[17].childNodes[0].nodeValue;
 	document.getElementById("rx_channel_mode").value = data[18].childNodes[0].nodeValue;
+	if (typeof window.applyWorkModeControls === "function") {
+		window.applyWorkModeControls();
+	}
 
 
 //状态位，post发送文件后状态位后端置1,前端按钮锁定，定时向后端发送get请求，每次请求后清除定时器避免一直发送，当检测状态位是0时解锁按钮。
@@ -439,6 +443,7 @@ function setupWorkModeHandler() {
     }
     // 绑定事件
     workModeSelect.addEventListener("change", updateControls);
+	window.applyWorkModeControls = updateControls;
 
     // 页面加载时初始化一次
     updateControls();

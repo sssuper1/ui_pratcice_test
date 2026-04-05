@@ -1,5 +1,6 @@
 #ifndef __MGMTM_TRANSMIT_H
 #define __MGMTM_TRANSMIT_H
+#include <netinet/in.h>
 #include "wg_config.h"
 #include "mgmt_types.h"
 
@@ -43,5 +44,7 @@ void update_time_slot_table(ob_state_part1 * part1_data, uint8_t * time_slot_tb_
 void reset_systeminfo_table(int j);
 void mgmt_status_report(struct sockaddr_in from);
 void SendNodeMsg(void* data, int datalen);
+void mgmt_recv_from_qkwg(void);
+void thread_report_test(void);
 
 #endif // !__MGMTM_TRANSMIT_H

@@ -105,9 +105,9 @@ void virt_eth_jgk_init(struct net_device *dev){
 	//	jgk_comm_board_parameter_data.channel_type,jgk_comm_board_parameter_data.device_mtu,jgk_comm_board_parameter_data.frequency,
 	//	jgk_comm_board_parameter_data.bandwidth,jgk_comm_board_parameter_data.device_mac[5]);
 }
-u16 ipCksum(void *ip, int len) //��Ϊ�ײ����ȹ̶�������ʹ��ʱlenΪ��ֵ20
+u16 ipCksum(void *ip, int len) //锟斤拷为锟阶诧拷锟斤拷锟饺固讹拷锟斤拷锟斤拷锟斤拷使锟斤拷时len为锟斤拷值20
 {
-	u16 *buf = (u16*)ip; //ÿ��ȡ16λ
+	u16 *buf = (u16*)ip; //每锟斤拷取16位
 	u32 cksum = 0;
 
 	while(len > 1)
